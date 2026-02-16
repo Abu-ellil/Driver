@@ -1,0 +1,45 @@
+
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>كابتن - تطبيق السائق</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
+    <style>
+        /* تأمين واجهة مستخدم تشبه الهاتف المحمول في المتصفح */
+        html, body, #root {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #0d1a12;
+            font-family: 'Cairo', sans-serif;
+        }
+        #root {
+            display: flex;
+            justify-content: center;
+        }
+        /* تحسين مظهر المكونات التي يتم تحويلها بواسطة react-native-web */
+        [data-focusable="true"] {
+            cursor: pointer;
+            outline: none;
+        }
+    </style>
+    <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@19.2.4",
+    "react-dom": "https://esm.sh/react-dom@19.2.4",
+    "react-native": "https://esm.sh/react-native-web@0.19.13",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/"
+  }
+}
+</script>
+</head>
+<body>
+    <div id="root"></div>
+</body>
+</html>
