@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Platform, ActivityIndicator } from 'react-native';
 import { Screen } from '../types';
