@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { Notification } from '../types';
 import { NotificationService } from '../services/NotificationService';
@@ -39,14 +38,15 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
     // Setup a "background sync" simulation every 30 seconds
     const interval = setInterval(async () => {
-      console.log('Background syncing notifications...');
       const remote = await NotificationService.fetchRemoteNotifications();
       // Only update if we have new notifications
-      if (remote.length > notifications.length) {
+      if (remote && remote.length > notifications.length) {
         setNotifications(remote);
         // Trigger banner for the latest new one
         const newest = remote[0];
-        if (!newest.read) setActiveBanner(newest);
+        if (newest && !newest.read) {
+          setActiveBanner(newest);
+        }
       }
     }, 30000);
 
@@ -68,23 +68,17 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       timestamp: new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' }),
       read: false,
     };
-    const updated = [newNotif, ...notifications];
-    setNotifications(updated);
+    setNotifications(prev => [newNotif, ...prev]);
     setActiveBanner(newNotif);
     
-    // Sync to "Backend" immediately
-    NotificationService.syncToServer(updated);
-
     // Auto clear banner after 4 seconds
     setTimeout(() => {
       setActiveBanner(current => current?.id === newNotif.id ? null : current);
     }, 4000);
-  }, [notifications]);
+  }, []);
 
   const markAsRead = (id: string) => {
-    const updated = notifications.map(n => n.id === id ? { ...n, read: true } : n);
-    setNotifications(updated);
-    NotificationService.syncToServer(updated);
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
   };
 
   const clearBanner = () => setActiveBanner(null);

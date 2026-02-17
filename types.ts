@@ -27,6 +27,7 @@ export interface Message {
   sender: 'customer' | 'driver';
   text: string;
   timestamp: string;
+  status?: 'sending' | 'sent' | 'delivered' | 'read';
 }
 
 export interface Notification {

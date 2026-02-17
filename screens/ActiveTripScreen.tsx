@@ -2,20 +2,30 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView } from 'react-native';
 import { Screen } from '../types';
+import { useConnectivity } from '../context/ConnectivityContext';
 
 interface ActiveTripScreenProps {
   onNavigate: (s: Screen) => void;
 }
 
 const ActiveTripScreen: React.FC<ActiveTripScreenProps> = ({ onNavigate }) => {
+  const { isOnline } = useConnectivity();
+
   return (
     <View style={styles.container}>
-      {/* Map Mock */}
+      {/* Map Mock or Fallback */}
       <View style={styles.mapContainer}>
-        <Image 
-          source={{ uri: "https://lh3.googleusercontent.com/aida-public/AB6AXuDZNpZ0yW6Jk_mbrQsUXjdhchRAaGGzpZHCJ87D3z3wP6DzEOyyUys0ZwivDdnCIylYt6zuAvmTeB_uREnwHQDN3zOCL3vpy_2zazDbOtOmmUpayjOI2fU52sK4OMGHHhaTvsmKOt4J12TJI1UlvWRR3fEWuVToiGYwT_yuEoPB9_OmjVKPSZoiSzQ5202hdMTfzRqc0JeQnOPqqwwJb1OuKvC1qVxtZgaWhmyUrVNLxxnDOWJGTZ2fGg-NZ-JO-hLzOIU2YaJAPA" }}
-          style={styles.mapImage}
-        />
+        {isOnline ? (
+          <Image 
+            source={{ uri: "https://lh3.googleusercontent.com/aida-public/AB6AXuDZNpZ0yW6Jk_mbrQsUXjdhchRAaGGzpZHCJ87D3z3wP6DzEOyyUys0ZwivDdnCIylYt6zuAvmTeB_uREnwHQDN3zOCL3vpy_2zazDbOtOmmUpayjOI2fU52sK4OMGHHhaTvsmKOt4J12TJI1UlvWRR3fEWuVToiGYwT_yuEoPB9_OmjVKPSZoiSzQ5202hdMTfzRqc0JeQnOPqqwwJb1OuKvC1qVxtZgaWhmyUrVNLxxnDOWJGTZ2fGg-NZ-JO-hLzOIU2YaJAPA" }}
+            style={styles.mapImage}
+          />
+        ) : (
+          <View style={[styles.mapImage, styles.mapFallback]}>
+             <Text style={styles.fallbackIcon}>map</Text>
+             <Text style={styles.fallbackText}>الموقع مخزن مؤقتاً - لا يوجد اتصال بالخريطة</Text>
+          </View>
+        )}
         <View style={styles.mapOverlay} />
         
         <View style={styles.mapControls}>
@@ -111,6 +121,9 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#112117' },
   mapContainer: { height: '45%', width: '100%' },
   mapImage: { width: '100%', height: '100%', opacity: 0.3 },
+  mapFallback: { backgroundColor: '#1a2e22', justifyContent: 'center', alignItems: 'center' },
+  fallbackIcon: { fontFamily: 'Material Icons Round', fontSize: 48, color: '#333', marginBottom: 12 },
+  fallbackText: { color: '#888', fontSize: 12, fontFamily: 'Cairo' },
   mapOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(17,33,23,0.2)' },
   mapControls: { position: 'absolute', right: 20, top: 60, gap: 12 },
   mapButton: { width: 44, height: 44, backgroundColor: 'rgba(26,46,34,0.9)', borderRadius: 12, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#333' },

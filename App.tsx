@@ -1,9 +1,10 @@
 
 import React, { useState } from 'react';
-import { View, StyleSheet, SafeAreaView, Dimensions, Platform } from 'react-native';
+import { View, StyleSheet, SafeAreaView, Dimensions, Platform, Text } from 'react-native';
 import { Screen } from './types';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
-import { NotificationProvider, useNotifications } from './context/NotificationContext';
+import { NotificationProvider } from './context/NotificationContext';
+import { ConnectivityProvider, useConnectivity } from './context/ConnectivityContext';
 import DashboardScreen from './screens/DashboardScreen';
 import LoginScreen from './screens/LoginScreen';
 import OrdersScreen from './screens/OrdersScreen';
@@ -19,9 +20,23 @@ import NotificationBanner from './components/NotificationBanner';
 const { width } = Dimensions.get('window');
 const MAX_WIDTH = 450;
 
+const OfflineBanner: React.FC = () => {
+  const { isOnline } = useConnectivity();
+  const { colors } = useTheme();
+
+  if (isOnline) return null;
+
+  return (
+    <View style={[styles.offlineBanner, { backgroundColor: '#f59e0b' }]}>
+      <Text style={styles.offlineIcon}>cloud_off</Text>
+      <Text style={styles.offlineText}>وضع العمل دون اتصال - سيتم المزامنة لاحقاً</Text>
+    </View>
+  );
+};
+
 const Main: React.FC = () => {
   const [currentScreen, setCurrentScreen] = useState<Screen>(Screen.LOGIN);
-  const [isOnline, setIsOnline] = useState(false);
+  const [isOnlineStatus, setIsOnlineStatus] = useState(false);
   const { colors } = useTheme();
 
   const renderScreen = () => {
@@ -32,8 +47,8 @@ const Main: React.FC = () => {
         return (
           <DashboardScreen 
             onNavigate={setCurrentScreen} 
-            isOnline={isOnline} 
-            setIsOnline={setIsOnline} 
+            isOnline={isOnlineStatus} 
+            setIsOnline={setIsOnlineStatus} 
           />
         );
       case Screen.ORDERS:
@@ -53,13 +68,14 @@ const Main: React.FC = () => {
       case Screen.NOTIFICATIONS:
         return <NotificationsScreen onNavigate={setCurrentScreen} />;
       default:
-        return <DashboardScreen onNavigate={setCurrentScreen} isOnline={isOnline} setIsOnline={setIsOnline} />;
+        return <DashboardScreen onNavigate={setCurrentScreen} isOnline={isOnlineStatus} setIsOnline={setIsOnlineStatus} />;
     }
   };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.surfaceAlt }]}>
       <View style={[styles.screenWrapper, { backgroundColor: colors.background }]}>
+        <OfflineBanner />
         <NotificationBanner onNavigate={setCurrentScreen} />
         {renderScreen()}
       </View>
@@ -69,9 +85,11 @@ const Main: React.FC = () => {
 
 const App: React.FC = () => (
   <ThemeProvider>
-    <NotificationProvider>
-      <Main />
-    </NotificationProvider>
+    <ConnectivityProvider>
+      <NotificationProvider>
+        <Main />
+      </NotificationProvider>
+    </ConnectivityProvider>
   </ThemeProvider>
 );
 
@@ -90,6 +108,26 @@ const styles = StyleSheet.create({
         boxShadow: '0 0 20px rgba(0,0,0,0.1)',
       }
     })
+  },
+  offlineBanner: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    zIndex: 10000,
+    gap: 8,
+  },
+  offlineIcon: {
+    fontFamily: 'Material Icons Round',
+    color: '#112117',
+    fontSize: 16,
+  },
+  offlineText: {
+    color: '#112117',
+    fontSize: 12,
+    fontWeight: 'bold',
+    fontFamily: 'Cairo',
   }
 });
 

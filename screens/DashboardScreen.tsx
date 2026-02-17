@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Platform, ActivityIndicator } from 'react-native';
 import { Screen } from '../types';
@@ -14,7 +15,6 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ onNavigate, isOnline,
   const { mode, colors, toggleTheme } = useTheme();
   const { addNotification, unreadCount, syncing } = useNotifications();
 
-  // Simulate a notification when going online
   const handleToggleOnline = () => {
     const newState = !isOnline;
     setIsOnline(newState);
@@ -83,7 +83,6 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ onNavigate, isOnline,
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        {/* Warning Banner */}
         <View style={styles.warningCard}>
           <Text style={styles.warningIcon}>report_problem</Text>
           <View style={styles.warningTextContent}>
@@ -95,7 +94,6 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ onNavigate, isOnline,
           </TouchableOpacity>
         </View>
 
-        {/* Stats */}
         <View style={styles.statsGrid}>
           <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <Text style={[styles.statLabel, { color: colors.subtext }]}>الأرباح</Text>
@@ -117,7 +115,6 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ onNavigate, isOnline,
           </View>
         </View>
 
-        {/* Map Preview */}
         <View style={[styles.mapContainer, { borderColor: colors.primarySoft }]}>
           <View style={[styles.mapMock, { backgroundColor: mode === 'dark' ? '#0d1a12' : '#e2e8f0' }]}>
              <View style={styles.mapOverlayTop}>
@@ -133,7 +130,6 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ onNavigate, isOnline,
           </View>
         </View>
 
-        {/* Orders Card */}
         <View style={[styles.nearbyCard, { backgroundColor: colors.surface, borderColor: colors.primarySoft }]}>
           <View style={styles.nearbyHeader}>
             <View>
@@ -151,7 +147,6 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ onNavigate, isOnline,
         </View>
       </ScrollView>
 
-      {/* Navigation */}
       <View style={[styles.navBar, { backgroundColor: colors.nav, borderTopColor: colors.border }]}>
         <TouchableOpacity style={styles.navItem} onPress={() => onNavigate(Screen.DASHBOARD)}>
           <View style={[styles.navItemActive, { backgroundColor: colors.primarySoft }]}>
@@ -159,21 +154,17 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ onNavigate, isOnline,
           </View>
           <Text style={[styles.navTextActive, { color: colors.primary }]}>الرئيسية</Text>
         </TouchableOpacity>
-        
         <TouchableOpacity style={styles.navItem} onPress={() => onNavigate(Screen.ORDERS)}>
           <Text style={[styles.navIcon, { color: colors.subtext }]}>receipt_long</Text>
           <Text style={[styles.navText, { color: colors.subtext }]}>الطلبات</Text>
         </TouchableOpacity>
-
         <TouchableOpacity style={[styles.fab, { backgroundColor: colors.primary, borderColor: colors.background }]}>
           <Text style={styles.fabIcon}>qr_code_scanner</Text>
         </TouchableOpacity>
-
         <TouchableOpacity style={styles.navItem} onPress={() => onNavigate(Screen.PAYMENT)}>
           <Text style={[styles.navIcon, { color: colors.subtext }]}>payments</Text>
           <Text style={[styles.navText, { color: colors.subtext }]}>الأرباح</Text>
         </TouchableOpacity>
-
         <TouchableOpacity style={styles.navItem} onPress={() => onNavigate(Screen.PROFILE)}>
           <Text style={[styles.navIcon, { color: colors.subtext }]}>person</Text>
           <Text style={[styles.navText, { color: colors.subtext }]}>حسابي</Text>
