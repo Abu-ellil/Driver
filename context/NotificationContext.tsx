@@ -1,6 +1,8 @@
+
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { Notification } from '../types';
 import { NotificationService } from '../services/NotificationService';
+import { useWebSocket } from './WebSocketContext';
 
 interface NotificationContextType {
   notifications: Notification[];
@@ -17,6 +19,7 @@ interface NotificationContextType {
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
 
 export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { socket } = useWebSocket();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [activeBanner, setActiveBanner] = useState<Notification | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -24,42 +27,33 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  // Initial Sync from "Backend"
-  useEffect(() => {
-    const init = async () => {
-      setSyncing(true);
-      const remote = await NotificationService.fetchRemoteNotifications();
-      setNotifications(remote);
-      setSyncing(false);
-      setLastSynced(new Date().toLocaleTimeString('ar-SA'));
-      await NotificationService.registerDeviceForPush();
-    };
-    init();
-
-    // Setup a "background sync" simulation every 30 seconds
-    const interval = setInterval(async () => {
-      const remote = await NotificationService.fetchRemoteNotifications();
-      // Only update if we have new notifications
-      if (remote && remote.length > notifications.length) {
-        setNotifications(remote);
-        // Trigger banner for the latest new one
-        const newest = remote[0];
-        if (newest && !newest.read) {
-          setActiveBanner(newest);
-        }
-      }
-    }, 30000);
-
-    return () => clearInterval(interval);
-  }, [notifications.length]);
-
-  const manualSync = async () => {
+  // Manual & Initial Sync
+  const manualSync = useCallback(async () => {
     setSyncing(true);
     const remote = await NotificationService.fetchRemoteNotifications();
     setNotifications(remote);
     setSyncing(false);
     setLastSynced(new Date().toLocaleTimeString('ar-SA'));
-  };
+  }, []);
+
+  useEffect(() => {
+    manualSync();
+  }, [manualSync]);
+
+  // WebSocket Integration for Real-time Notifications
+  useEffect(() => {
+    const handleWsNotification = (notif: Notification) => {
+      setNotifications(prev => [notif, ...prev]);
+      setActiveBanner(notif);
+      // Auto clear banner
+      setTimeout(() => {
+        setActiveBanner(current => current?.id === notif.id ? null : current);
+      }, 5000);
+    };
+
+    const offNotif = socket.on('notification', handleWsNotification);
+    return () => offNotif();
+  }, [socket]);
 
   const addNotification = useCallback((n: Omit<Notification, 'id' | 'timestamp' | 'read'>) => {
     const newNotif: Notification = {
@@ -71,7 +65,6 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     setNotifications(prev => [newNotif, ...prev]);
     setActiveBanner(newNotif);
     
-    // Auto clear banner after 4 seconds
     setTimeout(() => {
       setActiveBanner(current => current?.id === newNotif.id ? null : current);
     }, 4000);

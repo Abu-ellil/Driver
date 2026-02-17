@@ -1,17 +1,14 @@
 
-import React, { useState, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, Modal, TextInput, Animated, Image, Dimensions } from 'react-native';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, Modal, TextInput, Animated, Image, Dimensions, Easing } from 'react-native';
 import { Screen, Order } from '../types';
 import { useTheme } from '../context/ThemeContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-interface OrdersScreenProps {
-  onNavigate: (s: Screen) => void;
-}
-
 const INITIAL_ORDERS: Order[] = [
-  { id: '1', price: '45.50', stores: ['برجر بالاس', 'ستار كوفي'], distance: '3.2', time: '25', type: 'Multi', status: 'Available' },
+  { id: '1', price: '45.50', stores: ['برجر بالاس'], distance: '3.2', time: '25', type: 'Multi', status: 'Available' },
+  { id: '1b', price: '32.00', stores: ['برجر بالاس'], distance: '3.2', time: '20', type: 'Single', status: 'Available' },
   { id: '2', price: '12.00', stores: ['ماما ميا بيتزا'], distance: '1.5', time: '12', type: 'Single', status: 'Available' },
   { id: '3', price: '68.20', stores: ['فريش ماركت'], distance: '8.4', time: '40', type: 'Heavy', status: 'Available' },
   { id: '4', price: '22.00', stores: ['كنتاكي'], distance: '2.1', time: '18', type: 'Single', status: 'Available' },
@@ -33,27 +30,52 @@ const getStoreIcon = (name: string) => {
   return 'storefront';
 };
 
-// Mock coordinates for markers relative to the mock map image
 const MOCK_MARKERS = [
-  { id: '1', top: '30%', right: '20%' },
-  { id: '2', top: '45%', right: '60%' },
-  { id: '3', top: '70%', right: '35%' },
-  { id: '4', top: '25%', right: '75%' },
-  { id: '5', top: '60%', right: '15%' },
-  { id: '6', top: '15%', right: '40%' },
+  { id: '1', top: 30, right: 20 },
+  { id: '1b', top: 30, right: 20 },
+  { id: '2', top: 45, right: 62 },
+  { id: '3', top: 72, right: 35 },
+  { id: '4', top: 25, right: 75 },
+  { id: '5', top: 62, right: 18 },
+  { id: '6', top: 15, right: 42 },
 ];
+
+interface OrdersScreenProps {
+  onNavigate: (s: Screen) => void;
+}
 
 const OrdersScreen: React.FC<OrdersScreenProps> = ({ onNavigate }) => {
   const { colors, mode } = useTheme();
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
   const [sortBy, setSortBy] = useState<'price' | 'distance' | 'time'>('price');
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [selectedMarkerIndex, setSelectedMarkerIndex] = useState<number | null>(null);
   
-  // Feedback state
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [rating, setRating] = useState(0);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
   const [hasPendingFeedback, setHasPendingFeedback] = useState(true);
+
+  const fadeAnim = useRef(new Animated.Value(1)).current;
+  const tooltipScale = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
+  }, [viewMode]);
+
+  useEffect(() => {
+    if (selectedMarkerIndex !== null) {
+      tooltipScale.setValue(0);
+      Animated.spring(tooltipScale, { toValue: 1, friction: 8, tension: 120, useNativeDriver: true }).start();
+    }
+  }, [selectedMarkerIndex]);
+
+  const toggleView = () => {
+    fadeAnim.setValue(0);
+    setSelectedMarkerIndex(null);
+    setViewMode(prev => prev === 'list' ? 'map' : 'list');
+  };
 
   const filteredAndSortedOrders = useMemo(() => {
     let result = [...INITIAL_ORDERS];
@@ -66,8 +88,52 @@ const OrdersScreen: React.FC<OrdersScreenProps> = ({ onNavigate }) => {
     return result;
   }, [sortBy]);
 
+  const clusters = useMemo(() => {
+    const CLUSTER_THRESHOLD = 15 / zoomLevel; 
+    const groups: { orders: Order[], top: number, right: number, isSameStore: boolean, storeName: string }[] = [];
+
+    filteredAndSortedOrders.forEach(order => {
+      const pos = MOCK_MARKERS.find(m => m.id === order.id) || MOCK_MARKERS[0];
+      
+      let addedToCluster = false;
+      for (const group of groups) {
+        const dx = Math.abs(group.right - pos.right);
+        const dy = Math.abs(group.top - pos.top);
+        if (dx < CLUSTER_THRESHOLD && dy < CLUSTER_THRESHOLD) {
+          group.orders.push(order);
+          group.isSameStore = group.orders.every(o => o.stores[0] === group.orders[0].stores[0]);
+          group.storeName = group.orders[0].stores[0];
+          addedToCluster = true;
+          break;
+        }
+      }
+
+      if (!addedToCluster) {
+        groups.push({ 
+          orders: [order], 
+          top: pos.top, 
+          right: pos.right, 
+          isSameStore: true, 
+          storeName: order.stores[0] 
+        });
+      }
+    });
+
+    return groups;
+  }, [filteredAndSortedOrders, zoomLevel]);
+
+  const handleMarkerPress = (index: number) => {
+    if (selectedMarkerIndex === index) {
+      setSelectedMarkerIndex(null);
+    } else {
+      setSelectedMarkerIndex(index);
+    }
+  };
+
   const toggleTag = (tag: string) => {
-    setSelectedTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]);
+    setSelectedTags(prev => 
+      prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
+    );
   };
 
   const handleSubmitFeedback = () => {
@@ -86,45 +152,20 @@ const OrdersScreen: React.FC<OrdersScreenProps> = ({ onNavigate }) => {
       <View style={styles.cardTop}>
         <View style={styles.storeIcons}>
           {order.stores.slice(0, 3).map((store, index) => (
-            <View 
-              key={`${order.id}-${store}`} 
-              style={[
-                styles.storeIcon, 
-                { 
-                  zIndex: 10 - index, 
-                  backgroundColor: colors.background, 
-                  borderColor: colors.border,
-                  marginLeft: index === 0 ? 0 : -15 
-                }
-              ]}
-            >
-               <Text style={[styles.iconLunch, { color: colors.primary }]}>
-                 {getStoreIcon(store)}
-               </Text>
+            <View key={`${order.id}-${store}`} style={[styles.storeIcon, { zIndex: 10 - index, backgroundColor: colors.background, borderColor: colors.border, marginLeft: index === 0 ? 0 : -15 }]}>
+               <Text style={[styles.iconLunch, { color: colors.primary }]}>{getStoreIcon(store)}</Text>
             </View>
           ))}
-          {order.stores.length > 3 && (
-            <View style={[styles.storeIconCount, { backgroundColor: colors.primarySoft, borderColor: colors.primary }]}>
-               <Text style={[styles.storeCountText, { color: colors.primary }]}>+{order.stores.length - 3}</Text>
-            </View>
-          )}
         </View>
         <View style={styles.priceContainer}>
           <Text style={[styles.priceText, { color: colors.primary }]}>{order.price} <Text style={styles.currencyText}>ر.س</Text></Text>
           <Text style={[styles.tipText, { color: colors.subtext }]}>صافي ربحك</Text>
         </View>
       </View>
-
       <View style={styles.cardMiddle}>
         <Text style={[styles.storeNameText, { color: colors.text }]}>{order.stores.join(' & ')}</Text>
-        <View style={styles.metaRow}>
-          <View style={styles.metaItem}>
-            <Text style={[styles.metaIcon, { color: colors.subtext }]}>near_me</Text>
-            <Text style={[styles.metaText, { color: colors.subtext }]}>{order.distance} كم</Text>
-          </View>
-        </View>
+        <View style={styles.metaRow}><View style={styles.metaItem}><Text style={[styles.metaIcon, { color: colors.subtext }]}>near_me</Text><Text style={[styles.metaText, { color: colors.subtext }]}>{order.distance} كم</Text></View></View>
       </View>
-
       <TouchableOpacity style={[styles.detailsButton, { backgroundColor: colors.primarySoft, borderColor: colors.primary, borderWidth: 1 }]} onPress={() => onNavigate(Screen.ORDER_DETAILS)}>
         <Text style={[styles.detailsButtonText, { color: colors.primary }]}>تفاصيل الطلب</Text>
         <Text style={[styles.detailsButtonIcon, { color: colors.primary }]}>info_outline</Text>
@@ -133,197 +174,126 @@ const OrdersScreen: React.FC<OrdersScreenProps> = ({ onNavigate }) => {
   );
 
   const renderMapView = () => (
-    <View style={styles.mapViewContainer}>
-      <Image 
-        source={{ uri: "https://lh3.googleusercontent.com/aida-public/AB6AXuDZNpZ0yW6Jk_mbrQsUXjdhchRAaGGzpZHCJ87D3z3wP6DzEOyyUys0ZwivDdnCIylYt6zuAvmTeB_uREnwHQDN3zOCL3vpy_2zazDbOtOmmUpayjOI2fU52sK4OMGHHhaTvsmKOt4J12TJI1UlvWRR3fEWuVToiGYwT_yuEoPB9_OmjVKPSZoiSzQ5202hdMTfzRqc0JeQnOPqqwwJb1OuKvC1qVxtZgaWhmyUrVNLxxnDOWJGTZ2fGg-NZ-JO-hLzOIU2YaJAPA" }}
-        style={styles.mapImageLarge}
-      />
+    <Animated.View style={[styles.mapViewContainer, { opacity: fadeAnim }]}>
+      <Image source={{ uri: "https://lh3.googleusercontent.com/aida-public/AB6AXuDZNpZ0yW6Jk_mbrQsUXjdhchRAaGGzpZHCJ87D3z3wP6DzEOyyUys0ZwivDdnCIylYt6zuAvmTeB_uREnwHQDN3zOCL3vpy_2zazDbOtOmmUpayjOI2fU52sK4OMGHHhaTvsmKOt4J12TJI1UlvWRR3fEWuVToiGYwT_yuEoPB9_OmjVKPSZoiSzQ5202hdMTfzRqc0JeQnOPqqwwJb1OuKvC1qVxtZgaWhmyUrVNLxxnDOWJGTZ2fGg-NZ-JO-hLzOIU2YaJAPA" }} style={[styles.mapImageLarge, { transform: [{ scale: 1 + (zoomLevel - 1) * 0.1 }] }]} />
       <View style={styles.mapOverlay} />
       
-      {filteredAndSortedOrders.map((order) => {
-        const mockPos = MOCK_MARKERS.find(m => m.id === order.id) || MOCK_MARKERS[0];
+      {clusters.map((cluster, index) => {
+        const isCluster = cluster.orders.length > 1;
+        const totalEarning = cluster.orders.reduce((sum, o) => sum + parseFloat(o.price), 0);
+        const mainOrder = cluster.orders[0];
+        const isSelected = selectedMarkerIndex === index;
+
         return (
           <TouchableOpacity 
-            key={`marker-${order.id}`}
-            style={[styles.markerContainer, { top: mockPos.top, right: mockPos.right }]}
-            onPress={() => onNavigate(Screen.ORDER_DETAILS)}
+            key={`marker-group-${index}`}
+            activeOpacity={0.9}
+            style={[styles.markerContainer, { top: `${cluster.top}%`, right: `${cluster.right}%` }]}
+            onPress={() => handleMarkerPress(index)}
           >
-            <View style={[styles.markerBubble, { backgroundColor: colors.surface, borderColor: colors.primary }]}>
-               <Text style={[styles.markerPrice, { color: colors.primary }]}>{order.price}</Text>
-               <View style={[styles.markerIconBox, { backgroundColor: colors.primary }]}>
-                  <Text style={styles.markerIcon}>{getStoreIcon(order.stores[0])}</Text>
-               </View>
-            </View>
-            <View style={[styles.markerTail, { borderTopColor: colors.primary }]} />
+            {isSelected && (
+              <Animated.View style={[styles.calloutContainer, { backgroundColor: colors.surface, borderColor: colors.primary, transform: [{ scale: tooltipScale }, { translateY: -85 }] }]}>
+                <View style={styles.calloutContent}>
+                  <Text style={[styles.calloutStoreName, { color: colors.text }]}>{isCluster ? (cluster.isSameStore ? `من متجر ${cluster.storeName}` : 'مجموعة طلبات') : mainOrder.stores[0]}</Text>
+                  <View style={styles.calloutPriceRow}>
+                    <Text style={[styles.calloutPrice, { color: colors.primary }]}>{totalEarning.toFixed(2)} <Text style={styles.calloutCurrency}>ر.س</Text></Text>
+                    {isCluster && <Text style={[styles.calloutCount, { color: colors.subtext }]}>{cluster.orders.length} طلبات</Text>}
+                  </View>
+                  <TouchableOpacity style={[styles.calloutAction, { backgroundColor: colors.primary }]} onPress={() => onNavigate(Screen.ORDER_DETAILS)}>
+                    <Text style={styles.calloutActionText}>عرض التفاصيل</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={[styles.tooltipArrow, { borderTopColor: colors.primary }]} />
+              </Animated.View>
+            )}
+
+            {isCluster ? (
+              <View style={[
+                styles.clusterMarker, 
+                { 
+                  backgroundColor: cluster.isSameStore ? colors.primary : '#2563eb', 
+                  borderColor: colors.surface,
+                  transform: [{ scale: isSelected ? 1.2 : 1 }]
+                }
+              ]}>
+                <Text style={styles.clusterText}>{cluster.orders.length}</Text>
+                {cluster.isSameStore && (
+                  <Text style={[styles.miniStoreIcon, { color: '#112117' }]}>{getStoreIcon(cluster.storeName)}</Text>
+                )}
+                <View style={[styles.clusterPulse, { borderColor: cluster.isSameStore ? colors.primary : '#2563eb' }]} />
+              </View>
+            ) : (
+              <View style={[styles.markerBubble, { backgroundColor: colors.surface, borderColor: isSelected ? colors.primary : colors.border, transform: [{ scale: isSelected ? 1.15 : 1 }] }]}>
+                 <Text style={[styles.markerPrice, { color: isSelected ? colors.primary : colors.text }]}>{mainOrder.price}</Text>
+                 <View style={[styles.markerIconBox, { backgroundColor: isSelected ? colors.primary : colors.surfaceAlt }]}>
+                    <Text style={[styles.markerIcon, { color: isSelected ? '#112117' : colors.primary }]}>{getStoreIcon(mainOrder.stores[0])}</Text>
+                 </View>
+                 <View style={[styles.markerTail, { borderTopColor: isSelected ? colors.primary : colors.border }]} />
+              </View>
+            )}
           </TouchableOpacity>
         );
       })}
 
-      <View style={styles.mapFloatingInfo}>
-        <View style={[styles.infoPill, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Text style={[styles.infoPillText, { color: colors.text }]}>{filteredAndSortedOrders.length} طلبات متاحة حالياً</Text>
-        </View>
+      <View style={styles.mapControls}>
+        <TouchableOpacity style={[styles.mapCtrlBtn, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => { setZoomLevel(prev => Math.min(prev + 1, 3)); setSelectedMarkerIndex(null); }}><Text style={[styles.mapCtrlIcon, { color: colors.text }]}>add</Text></TouchableOpacity>
+        <TouchableOpacity style={[styles.mapCtrlBtn, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => { setZoomLevel(prev => Math.max(prev - 1, 1)); setSelectedMarkerIndex(null); }}><Text style={[styles.mapCtrlIcon, { color: colors.text }]}>remove</Text></TouchableOpacity>
       </View>
-    </View>
+      <View style={styles.mapFloatingInfo}><View style={[styles.infoPill, { backgroundColor: colors.surface, borderColor: colors.border }]}><Text style={[styles.infoPillText, { color: colors.text }]}>{filteredAndSortedOrders.length} طلبات متاحة • مستوى الزوم {zoomLevel}</Text></View></View>
+    </Animated.View>
   );
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <View style={styles.headerTop}>
-          <View>
-            <Text style={[styles.title, { color: colors.text }]}>الطلبات</Text>
-            <Text style={[styles.subtitle, { color: colors.subtext }]}>أنت متصل وتبحث عن رحلات</Text>
-          </View>
+          <View><Text style={[styles.title, { color: colors.text }]}>الطلبات</Text><Text style={[styles.subtitle, { color: colors.subtext }]}>أنت متصل وتبحث عن رحلات</Text></View>
           <View style={styles.headerActions}>
-            <TouchableOpacity 
-              style={[styles.viewToggle, { backgroundColor: colors.surface, borderColor: colors.border }]} 
-              onPress={() => setViewMode(viewMode === 'list' ? 'map' : 'list')}
-            >
-              <Text style={[styles.toggleIcon, { color: colors.primary }]}>
-                {viewMode === 'list' ? 'map' : 'view_list'}
-              </Text>
-              <Text style={[styles.toggleText, { color: colors.text }]}>
-                {viewMode === 'list' ? 'الخريطة' : 'القائمة'}
-              </Text>
+            <TouchableOpacity style={[styles.viewToggle, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={toggleView}>
+              <Text style={[styles.toggleIcon, { color: colors.primary }]}>{viewMode === 'list' ? 'map' : 'view_list'}</Text>
+              <Text style={[styles.toggleText, { color: colors.text }]}>{viewMode === 'list' ? 'الخريطة' : 'القائمة'}</Text>
             </TouchableOpacity>
           </View>
         </View>
-
         {viewMode === 'list' && (
           <View style={styles.filterSection}>
             <Text style={[styles.filterLabel, { color: colors.subtext }]}>ترتيب حسب</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll} contentContainerStyle={{ flexDirection: 'row-reverse' }}>
-              <TouchableOpacity 
-                style={[styles.sortPill, sortBy === 'price' && { backgroundColor: colors.primary, borderColor: colors.primary }]} 
-                onPress={() => setSortBy('price')}
-              >
-                <Text style={[styles.sortIcon, { color: sortBy === 'price' ? '#112117' : colors.subtext }]}>payments</Text>
-                <Text style={[styles.sortText, { color: sortBy === 'price' ? '#112117' : colors.subtext }]}>الأعلى سعراً</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.sortPill, sortBy === 'distance' && { backgroundColor: colors.primary, borderColor: colors.primary }]} 
-                onPress={() => setSortBy('distance')}
-              >
-                <Text style={[styles.sortIcon, { color: sortBy === 'distance' ? '#112117' : colors.subtext }]}>near_me</Text>
-                <Text style={[styles.sortText, { color: sortBy === 'distance' ? '#112117' : colors.subtext }]}>الأقرب مسافة</Text>
-              </TouchableOpacity>
+              <TouchableOpacity style={[styles.sortPill, sortBy === 'price' && { backgroundColor: colors.primary, borderColor: colors.primary }]} onPress={() => setSortBy('price')}><Text style={[styles.sortIcon, { color: sortBy === 'price' ? '#112117' : colors.subtext }]}>payments</Text><Text style={[styles.sortText, { color: sortBy === 'price' ? '#112117' : colors.subtext }]}>الأعلى سعراً</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.sortPill, sortBy === 'distance' && { backgroundColor: colors.primary, borderColor: colors.primary }]} onPress={() => setSortBy('distance')}><Text style={[styles.sortIcon, { color: sortBy === 'distance' ? '#112117' : colors.subtext }]}>near_me</Text><Text style={[styles.sortText, { color: sortBy === 'distance' ? '#112117' : colors.subtext }]}>الأقرب مسافة</Text></TouchableOpacity>
             </ScrollView>
           </View>
         )}
       </View>
 
       {viewMode === 'list' ? (
-        <ScrollView contentContainerStyle={styles.listContent}>
+        <Animated.ScrollView contentContainerStyle={styles.listContent} style={{ opacity: fadeAnim }}>
           {hasPendingFeedback && (
             <View style={[styles.feedbackTeaser, { backgroundColor: colors.surface, borderColor: colors.primarySoft }]}>
-              <View style={styles.teaserHeader}>
-                <View style={[styles.teaserIconBox, { backgroundColor: colors.primarySoft }]}>
-                  <Text style={[styles.teaserIcon, { color: colors.primary }]}>reviews</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.teaserTitle, { color: colors.text }]}>كيف كانت رحلتك الأخيرة؟</Text>
-                  <Text style={[styles.teaserSubtitle, { color: colors.subtext }]}>رأيك يهمنا لتحسين تجربة العمل</Text>
-                </View>
-              </View>
-              <TouchableOpacity 
-                style={[styles.rateActionBtn, { backgroundColor: colors.primary }]}
-                onPress={() => setShowFeedbackModal(true)}
-              >
-                <Text style={styles.rateActionText}>تقييم الآن</Text>
-                <Text style={styles.rateActionIcon}>star</Text>
-              </TouchableOpacity>
+              <View style={styles.teaserHeader}><View style={[styles.teaserIconBox, { backgroundColor: colors.primarySoft }]}><Text style={[styles.teaserIcon, { color: colors.primary }]}>reviews</Text></View><View style={{ flex: 1 }}><Text style={[styles.teaserTitle, { color: colors.text }]}>كيف كانت رحلتك الأخيرة؟</Text><Text style={[styles.teaserSubtitle, { color: colors.subtext }]}>رأيك يهمنا لتحسين تجربة العمل</Text></View></View>
+              <TouchableOpacity style={[styles.rateActionBtn, { backgroundColor: colors.primary }]} onPress={() => setShowFeedbackModal(true)}><Text style={styles.rateActionText}>تقييم الآن</Text><Text style={styles.rateActionIcon}>star</Text></TouchableOpacity>
             </View>
           )}
-
           {filteredAndSortedOrders.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={[styles.emptyIcon, { color: colors.border }]}>search_off</Text>
-              <Text style={[styles.emptyTitle, { color: colors.text }]}>لا توجد نتائج</Text>
-            </View>
+            <View style={styles.emptyState}><Text style={[styles.emptyIcon, { color: colors.border }]}>search_off</Text><Text style={[styles.emptyTitle, { color: colors.text }]}>لا توجد نتائج</Text></View>
           ) : (
             filteredAndSortedOrders.map(renderOrderCard)
           )}
-        </ScrollView>
+        </Animated.ScrollView>
       ) : renderMapView()}
 
       <Modal visible={showFeedbackModal} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
-            <View style={styles.modalHeader}>
-              <TouchableOpacity onPress={() => setShowFeedbackModal(false)}>
-                <Text style={[styles.closeModalIcon, { color: colors.subtext }]}>close</Text>
-              </TouchableOpacity>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>تقييم التجربة</Text>
-              <View style={{ width: 24 }} />
-            </View>
-
+            <View style={styles.modalHeader}><TouchableOpacity onPress={() => setShowFeedbackModal(false)}><Text style={[styles.closeModalIcon, { color: colors.subtext }]}>close</Text></TouchableOpacity><Text style={[styles.modalTitle, { color: colors.text }]}>تقييم التجربة</Text><View style={{ width: 24 }} /></View>
             {feedbackSubmitted ? (
-              <View style={styles.successState}>
-                <View style={[styles.successCircle, { backgroundColor: colors.primarySoft }]}>
-                  <Text style={[styles.successIcon, { color: colors.primary }]}>check_circle</Text>
-                </View>
-                <Text style={[styles.successTitle, { color: colors.text }]}>شكراً لك!</Text>
-                <Text style={[styles.successSubtitle, { color: colors.subtext }]}>تم إرسال تقييمك بنجاح</Text>
-              </View>
+              <View style={styles.successState}><View style={[styles.successCircle, { backgroundColor: colors.primarySoft }]}><Text style={[styles.successIcon, { color: colors.primary }]}>check_circle</Text></View><Text style={[styles.successTitle, { color: colors.text }]}>شكراً لك!</Text><Text style={[styles.successSubtitle, { color: colors.subtext }]}>تم إرسال تقييمك بنجاح</Text></View>
             ) : (
               <ScrollView showsVerticalScrollIndicator={false}>
-                <View style={styles.ratingSection}>
-                  <Text style={[styles.ratingLabel, { color: colors.subtext }]}>كيف تقيم رحلتك الأخيرة؟</Text>
-                  <View style={styles.starsRow}>
-                    {[1, 2, 3, 4, 5].map((s) => (
-                      <TouchableOpacity key={s} onPress={() => setRating(s)}>
-                        <Text style={[
-                          styles.starIconLarge, 
-                          { color: s <= rating ? '#facc15' : colors.border }
-                        ]}>
-                          {s <= rating ? 'star' : 'star_border'}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </View>
-
-                <View style={styles.tagsSection}>
-                  <Text style={[styles.ratingLabel, { color: colors.subtext }]}>ما الذي أعجبك؟</Text>
-                  <View style={styles.tagsGrid}>
-                    {FEEDBACK_TAGS.map(tag => (
-                      <TouchableOpacity 
-                        key={tag} 
-                        style={[
-                          styles.tagChip, 
-                          { borderColor: colors.border },
-                          selectedTags.includes(tag) && { backgroundColor: colors.primarySoft, borderColor: colors.primary }
-                        ]}
-                        onPress={() => toggleTag(tag)}
-                      >
-                        <Text style={[
-                          styles.tagText, 
-                          { color: selectedTags.includes(tag) ? colors.primary : colors.subtext }
-                        ]}>{tag}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </View>
-
-                <View style={styles.commentSection}>
-                   <Text style={[styles.ratingLabel, { color: colors.subtext }]}>ملاحظات إضافية (اختياري)</Text>
-                   <TextInput 
-                     style={[styles.commentInput, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
-                     placeholder="اكتب تعليقك هنا..."
-                     placeholderTextColor={colors.subtext}
-                     multiline
-                     numberOfLines={4}
-                   />
-                </View>
-
-                <TouchableOpacity 
-                  style={[styles.submitBtn, { backgroundColor: rating > 0 ? colors.primary : colors.border }]}
-                  disabled={rating === 0}
-                  onPress={handleSubmitFeedback}
-                >
-                  <Text style={[styles.submitBtnText, { color: rating > 0 ? '#112117' : colors.subtext }]}>إرسال التقييم</Text>
-                </TouchableOpacity>
+                <View style={styles.ratingSection}><Text style={[styles.ratingLabel, { color: colors.subtext }]}>كيف تقيم رحلتك الأخيرة؟</Text><View style={styles.starsRow}>{[1, 2, 3, 4, 5].map((s) => (<TouchableOpacity key={s} onPress={() => setRating(s)}><Text style={[styles.starIconLarge, { color: s <= rating ? '#facc15' : colors.border }]}>{s <= rating ? 'star' : 'star_border'}</Text></TouchableOpacity>))}</View></View>
+                <View style={styles.tagsSection}><Text style={[styles.ratingLabel, { color: colors.subtext }]}>ما الذي أعجبك؟</Text><View style={styles.tagsGrid}>{FEEDBACK_TAGS.map(tag => (<TouchableOpacity key={tag} style={[styles.tagChip, { borderColor: colors.border }, selectedTags.includes(tag) && { backgroundColor: colors.primarySoft, borderColor: colors.primary }]} onPress={() => toggleTag(tag)}><Text style={[styles.tagText, { color: selectedTags.includes(tag) ? colors.primary : colors.subtext }]}>{tag}</Text></TouchableOpacity>))}</View></View>
+                <View style={styles.commentSection}><Text style={[styles.ratingLabel, { color: colors.subtext }]}>ملاحظات إضافية (اختياري)</Text><TextInput style={[styles.commentInput, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]} placeholder="اكتب تعليقك هنا..." placeholderTextColor={colors.subtext} multiline numberOfLines={4} /></View>
+                <TouchableOpacity style={[styles.submitBtn, { backgroundColor: rating > 0 ? colors.primary : colors.border }]} disabled={rating === 0} onPress={handleSubmitFeedback}><Text style={[styles.submitBtnText, { color: rating > 0 ? '#112117' : colors.subtext }]}>إرسال التقييم</Text></TouchableOpacity>
               </ScrollView>
             )}
           </View>
@@ -331,27 +301,11 @@ const OrdersScreen: React.FC<OrdersScreenProps> = ({ onNavigate }) => {
       </Modal>
 
       <View style={[styles.navBar, { backgroundColor: colors.nav, borderTopColor: colors.border }]}>
-        <TouchableOpacity style={styles.navItem} onPress={() => onNavigate(Screen.DASHBOARD)}>
-          <Text style={[styles.navIcon, { color: colors.subtext }]}>dashboard</Text>
-          <Text style={[styles.navText, { color: colors.subtext }]}>الرئيسية</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => onNavigate(Screen.ORDERS)}>
-          <View style={[styles.navItemActive, { backgroundColor: colors.primarySoft }]}>
-            <Text style={[styles.navIconActive, { color: colors.primary }]}>receipt_long</Text>
-          </View>
-          <Text style={[styles.navTextActive, { color: colors.primary }]}>الطلبات</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.fab, { backgroundColor: colors.primary, borderColor: colors.background }]}>
-          <Text style={styles.fabIcon}>qr_code_scanner</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => onNavigate(Screen.PAYMENT)}>
-          <Text style={[styles.navIcon, { color: colors.subtext }]}>payments</Text>
-          <Text style={[styles.navText, { color: colors.subtext }]}>الأرباح</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => onNavigate(Screen.PROFILE)}>
-          <Text style={[styles.navIcon, { color: colors.subtext }]}>person</Text>
-          <Text style={[styles.navText, { color: colors.subtext }]}>حسابي</Text>
-        </TouchableOpacity>
+        <TouchableOpacity style={styles.navItem} onPress={() => onNavigate(Screen.DASHBOARD)}><Text style={[styles.navIcon, { color: colors.subtext }]}>dashboard</Text><Text style={[styles.navText, { color: colors.subtext }]}>الرئيسية</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.navItem} onPress={() => onNavigate(Screen.ORDERS)}><View style={[styles.navItemActive, { backgroundColor: colors.primarySoft }]}><Text style={[styles.navIconActive, { color: colors.primary }]}>receipt_long</Text></View><Text style={[styles.navTextActive, { color: colors.primary }]}>الطلبات</Text></TouchableOpacity>
+        <TouchableOpacity style={[styles.fab, { backgroundColor: colors.primary, borderColor: colors.background }]}><Text style={styles.fabIcon}>qr_code_scanner</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.navItem} onPress={() => onNavigate(Screen.PAYMENT)}><Text style={[styles.navIcon, { color: colors.subtext }]}>payments</Text><Text style={[styles.navText, { color: colors.subtext }]}>الأرباح</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.navItem} onPress={() => onNavigate(Screen.PROFILE)}><Text style={[styles.navIcon, { color: colors.subtext }]}>person</Text><Text style={[styles.navText, { color: colors.subtext }]}>حسابي</Text></TouchableOpacity>
       </View>
     </View>
   );
@@ -370,17 +324,7 @@ const styles = StyleSheet.create({
   filterSection: { marginBottom: 15 },
   filterLabel: { fontSize: 11, fontWeight: 'bold', fontFamily: 'Cairo', textAlign: 'right', marginBottom: 8, opacity: 0.8 },
   filterScroll: { marginBottom: 0 },
-  sortPill: { 
-    flexDirection: 'row-reverse', 
-    alignItems: 'center', 
-    paddingHorizontal: 16, 
-    paddingVertical: 8, 
-    borderRadius: 20, 
-    borderWidth: 1, 
-    borderColor: 'transparent',
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    marginLeft: 10 
-  },
+  sortPill: { flexDirection: 'row-reverse', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: 'transparent', backgroundColor: 'rgba(255,255,255,0.05)', marginLeft: 10 },
   sortIcon: { fontFamily: 'Material Icons Round', fontSize: 14, marginLeft: 6 },
   sortText: { fontSize: 12, fontWeight: '900', fontFamily: 'Cairo' },
   listContent: { padding: 20, paddingBottom: 120 },
@@ -397,8 +341,6 @@ const styles = StyleSheet.create({
   cardTop: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'flex-start' },
   storeIcons: { flexDirection: 'row' },
   storeIcon: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, justifyContent: 'center', alignItems: 'center' },
-  storeIconCount: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, justifyContent: 'center', alignItems: 'center', marginLeft: -15, zIndex: 1 },
-  storeCountText: { fontSize: 12, fontWeight: 'bold' },
   iconLunch: { fontFamily: 'Material Icons Round', fontSize: 22 },
   priceContainer: { alignItems: 'flex-start' },
   priceText: { fontSize: 26, fontWeight: '900' },
@@ -416,12 +358,29 @@ const styles = StyleSheet.create({
   mapViewContainer: { flex: 1, position: 'relative' },
   mapImageLarge: { width: '100%', height: '100%', opacity: 0.5 },
   mapOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.1)' },
-  markerContainer: { position: 'absolute', alignItems: 'center', zIndex: 10 },
+  markerContainer: { position: 'absolute', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
   markerBubble: { flexDirection: 'row-reverse', alignItems: 'center', padding: 4, paddingLeft: 12, borderRadius: 20, borderWidth: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 3, elevation: 5 },
   markerPrice: { fontSize: 14, fontWeight: 'bold', marginLeft: 8 },
   markerIconBox: { width: 28, height: 28, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
-  markerIcon: { fontFamily: 'Material Icons Round', fontSize: 16, color: '#112117' },
-  markerTail: { width: 0, height: 0, backgroundColor: 'transparent', borderStyle: 'solid', borderLeftWidth: 6, borderRightWidth: 6, borderTopWidth: 8, borderLeftColor: 'transparent', borderRightColor: 'transparent', marginTop: -2 },
+  markerIcon: { fontFamily: 'Material Icons Round', fontSize: 16 },
+  markerTail: { position: 'absolute', bottom: -8, right: '50%', transform: [{translateX: 6}], width: 0, height: 0, backgroundColor: 'transparent', borderStyle: 'solid', borderLeftWidth: 6, borderRightWidth: 6, borderTopWidth: 8, borderLeftColor: 'transparent', borderRightColor: 'transparent' },
+  clusterMarker: { width: 44, height: 44, borderRadius: 22, borderWidth: 3, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 5, elevation: 8 },
+  miniStoreIcon: { fontFamily: 'Material Icons Round', fontSize: 12, position: 'absolute', bottom: -5 },
+  clusterText: { color: '#112117', fontSize: 18, fontWeight: '900' },
+  clusterPulse: { position: 'absolute', width: 60, height: 60, borderRadius: 30, borderWidth: 2, opacity: 0.3 },
+  calloutContainer: { position: 'absolute', paddingHorizontal: 16, paddingVertical: 14, borderRadius: 20, borderWidth: 1.5, alignItems: 'center', minWidth: 200, shadowColor: '#000', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.25, shadowRadius: 20, elevation: 15, zIndex: 100 },
+  calloutContent: { width: '100%', alignItems: 'center' },
+  calloutStoreName: { fontSize: 14, fontWeight: 'bold', fontFamily: 'Cairo', marginBottom: 4, textAlign: 'center' },
+  calloutPriceRow: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 12 },
+  calloutPrice: { fontSize: 20, fontWeight: '900', fontFamily: 'Cairo' },
+  calloutCurrency: { fontSize: 10 },
+  calloutCount: { fontSize: 10, fontFamily: 'Cairo', opacity: 0.7 },
+  calloutAction: { width: '100%', height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  calloutActionText: { color: '#112117', fontSize: 12, fontWeight: 'bold', fontFamily: 'Cairo' },
+  tooltipArrow: { position: 'absolute', bottom: -9, width: 0, height: 0, borderLeftWidth: 9, borderRightWidth: 9, borderTopWidth: 9, borderLeftColor: 'transparent', borderRightColor: 'transparent' },
+  mapControls: { position: 'absolute', right: 20, top: 20, gap: 10 },
+  mapCtrlBtn: { width: 44, height: 44, borderRadius: 12, borderWidth: 1, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 5 },
+  mapCtrlIcon: { fontFamily: 'Material Icons Round', fontSize: 24 },
   mapFloatingInfo: { position: 'absolute', bottom: 100, alignSelf: 'center' },
   infoPill: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 25, borderWidth: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 5 },
   infoPillText: { fontSize: 13, fontWeight: 'bold', fontFamily: 'Cairo' },

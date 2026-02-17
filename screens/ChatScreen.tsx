@@ -5,16 +5,98 @@ import { Screen, Message } from '../types';
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
 import { useConnectivity } from '../context/ConnectivityContext';
 import { useTheme } from '../context/ThemeContext';
+import { useWebSocket } from '../context/WebSocketContext';
 
 interface ChatScreenProps {
   onNavigate: (s: Screen) => void;
 }
+
+const CHAT_STORAGE_KEY = 'captain_chat_history';
 
 const INITIAL_MESSAGES: Message[] = [
   { id: '1', sender: 'customer', text: 'مرحباً كابتن 👋، هل اقتربت من المطعم؟', timestamp: '١٠:٣٢ ص', status: 'read' },
   { id: '2', sender: 'driver', text: 'أهلاً بك يا محمد. نعم، أنا على بعد ٥ دقائق تقريباً من الموقع.', timestamp: '١٠:٣٣ ص', status: 'read' },
   { id: '3', sender: 'customer', text: 'ممتاز، يرجى الاتصال بي عند الوصول لأن الجرس لا يعمل.', timestamp: '١٠:٣٤ ص', status: 'read' }
 ];
+
+// مكون فرعي لعرض حالة الرسالة مع تأثير حركي للأيقونة
+const AnimatedStatus: React.FC<{ status?: Message['status'], colors: any }> = ({ status, colors }) => {
+  const scale = useRef(new Animated.Value(1)).current;
+  const lastStatus = useRef(status);
+
+  useEffect(() => {
+    if (status === 'read' && lastStatus.current !== 'read') {
+      Animated.sequence([
+        Animated.timing(scale, { toValue: 1.5, duration: 150, useNativeDriver: true }),
+        Animated.spring(scale, { toValue: 1, friction: 3, tension: 40, useNativeDriver: true }),
+      ]).start();
+    }
+    lastStatus.current = status;
+  }, [status]);
+
+  if (!status) return null;
+
+  const getStatusIcon = (s?: string) => {
+    switch (s) {
+      case 'sending': return 'schedule';
+      case 'sent': return 'done';
+      case 'delivered': return 'done_all';
+      case 'read': return 'done_all';
+      default: return null;
+    }
+  };
+
+  const getStatusColor = (s?: string) => {
+    if (s === 'read') return colors.primary;
+    return colors.subtext;
+  };
+
+  return (
+    <Animated.Text 
+      style={[
+        styles.statusIcon, 
+        { color: getStatusColor(status), transform: [{ scale }] }
+      ]}
+    >
+      {getStatusIcon(status)}
+    </Animated.Text>
+  );
+};
+
+// مكون عنصر الرسالة مع تأثير حركي للفقاعة نفسها
+const ChatMessageItem: React.FC<{ msg: Message, colors: any }> = ({ msg, colors }) => {
+  const bubbleScale = useRef(new Animated.Value(1)).current;
+  const lastStatus = useRef(msg.status);
+
+  useEffect(() => {
+    // تشغيل التأثير عند تحول الحالة إلى 'read' فقط (لرسائل السائق)
+    if (msg.sender === 'driver' && msg.status === 'read' && lastStatus.current !== 'read') {
+      Animated.sequence([
+        Animated.timing(bubbleScale, { toValue: 1.05, duration: 150, useNativeDriver: true }),
+        Animated.spring(bubbleScale, { toValue: 1, friction: 4, tension: 50, useNativeDriver: true }),
+      ]).start();
+    }
+    lastStatus.current = msg.status;
+  }, [msg.status]);
+
+  return (
+    <View style={[styles.messageWrapper, msg.sender === 'driver' ? styles.driverWrapper : styles.customerWrapper]}>
+      <Animated.View style={[
+        styles.bubble, 
+        msg.sender === 'driver' ? [styles.driverBubble, { backgroundColor: colors.primary }] : [styles.customerBubble, { backgroundColor: colors.surface, borderColor: colors.border }],
+        { transform: [{ scale: bubbleScale }] }
+      ]}>
+        <Text style={[styles.bubbleText, msg.sender === 'driver' ? styles.driverText : { color: colors.text }]}>{msg.text}</Text>
+      </Animated.View>
+      <View style={styles.msgMeta}>
+         <Text style={styles.msgTime}>{msg.timestamp}</Text>
+         {msg.sender === 'driver' && (
+           <AnimatedStatus status={msg.status} colors={colors} />
+         )}
+      </View>
+    </View>
+  );
+};
 
 // Helper functions for audio encoding/decoding
 function encode(bytes: Uint8Array) {
@@ -40,8 +122,15 @@ function createBlob(data: Float32Array): any {
 
 const ChatScreen: React.FC<ChatScreenProps> = ({ onNavigate }) => {
   const { isOnline } = useConnectivity();
+  const { socket } = useWebSocket();
   const { colors } = useTheme();
-  const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES);
+  
+  // تحميل الرسائل من Local Storage أو استخدام الرسائل الافتراضية
+  const [messages, setMessages] = useState<Message[]>(() => {
+    const saved = localStorage.getItem(CHAT_STORAGE_KEY);
+    return saved ? JSON.parse(saved) : INITIAL_MESSAGES;
+  });
+
   const [messageText, setMessageText] = useState('');
   const [isDictating, setIsDictating] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -51,6 +140,11 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ onNavigate }) => {
   const audioContextRef = useRef<AudioContext | null>(null);
   const sessionRef = useRef<any>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  // حفظ الرسائل في Local Storage عند كل تغيير
+  useEffect(() => {
+    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages));
+  }, [messages]);
 
   // Typing animation dots
   const dot1 = useRef(new Animated.Value(0)).current;
@@ -76,6 +170,32 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ onNavigate }) => {
     }
   }, [isCustomerTyping]);
 
+  useEffect(() => {
+    const handleIncomingMessage = (msg: Message) => {
+      setMessages(prev => [...prev, msg]);
+      scrollToBottom();
+    };
+
+    const handleReadReceipt = (data: { messageId: string, status: Message['status'] }) => {
+      setMessages(prev => prev.map(m => m.id === data.messageId ? { ...m, status: data.status } : m));
+    };
+
+    const handleTypingStatus = (data: { isTyping: boolean }) => {
+      setIsCustomerTyping(data.isTyping);
+      if (data.isTyping) scrollToBottom();
+    };
+
+    const offMsg = socket.on('chat_message', handleIncomingMessage);
+    const offReceipt = socket.on('read_receipt', handleReadReceipt);
+    const offTyping = socket.on('typing_status', handleTypingStatus);
+
+    return () => {
+      offMsg();
+      offReceipt();
+      offTyping();
+    };
+  }, [socket]);
+
   const scrollToBottom = () => {
     setTimeout(() => {
       scrollViewRef.current?.scrollToEnd({ animated: true });
@@ -86,7 +206,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ onNavigate }) => {
     if (!messageText.trim()) return;
 
     const newMessage: Message = {
-      id: Date.now().toString(),
+      id: `driver_${Date.now()}`,
       sender: 'driver',
       text: messageText,
       timestamp: new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' }),
@@ -97,31 +217,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ onNavigate }) => {
     setMessageText('');
     scrollToBottom();
 
-    // Simulate flow
-    if (isOnline) {
-      setTimeout(() => {
-        setMessages(prev => prev.map(m => m.id === newMessage.id ? { ...m, status: 'delivered' } : m));
-      }, 1500);
-
-      setTimeout(() => {
-        setMessages(prev => prev.map(m => m.id === newMessage.id ? { ...m, status: 'read' } : m));
-        // Customer starts typing after seeing message
-        setIsCustomerTyping(true);
-        scrollToBottom();
-      }, 3000);
-
-      setTimeout(() => {
-        setIsCustomerTyping(false);
-        const reply: Message = {
-          id: (Date.now() + 1).toString(),
-          sender: 'customer',
-          text: 'شكراً كابتن، سأكون بانتظارك عند الباب.',
-          timestamp: new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' }),
-        };
-        setMessages(prev => [...prev, reply]);
-        scrollToBottom();
-      }, 6000);
-    }
+    socket.send('chat_message', newMessage);
   };
 
   const stopDictation = async () => {
@@ -189,22 +285,6 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ onNavigate }) => {
     }
   };
 
-  const getStatusIcon = (status?: string) => {
-    switch (status) {
-      case 'sending': return 'schedule';
-      case 'sent': return 'done';
-      case 'delivered': return 'done_all';
-      case 'read': return 'done_all';
-      default: return null;
-    }
-  };
-
-  const getStatusColor = (status?: string) => {
-    if (status === 'read') return colors.primary;
-    if (status === 'sending') return colors.subtext;
-    return colors.subtext;
-  };
-
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.container}>
       <View style={styles.header}>
@@ -232,17 +312,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ onNavigate }) => {
         <View style={styles.dateBadge}><Text style={styles.dateText}>اليوم، ١٠:٣٠ صباحاً</Text></View>
         
         {messages.map((msg) => (
-          <View key={msg.id} style={[styles.messageWrapper, msg.sender === 'driver' ? styles.driverWrapper : styles.customerWrapper]}>
-            <View style={[styles.bubble, msg.sender === 'driver' ? [styles.driverBubble, { backgroundColor: colors.primary }] : [styles.customerBubble, { backgroundColor: colors.surface, borderColor: colors.border }]]}>
-              <Text style={[styles.bubbleText, msg.sender === 'driver' ? styles.driverText : { color: colors.text }]}>{msg.text}</Text>
-            </View>
-            <View style={styles.msgMeta}>
-               <Text style={styles.msgTime}>{msg.timestamp}</Text>
-               {msg.sender === 'driver' && msg.status && (
-                 <Text style={[styles.statusIcon, { color: getStatusColor(msg.status) }]}>{getStatusIcon(msg.status)}</Text>
-               )}
-            </View>
-          </View>
+          <ChatMessageItem key={msg.id} msg={msg} colors={colors} />
         ))}
 
         {isCustomerTyping && (
@@ -266,7 +336,10 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ onNavigate }) => {
               placeholderTextColor={isDictating ? colors.primary : colors.subtext}
               multiline
               value={messageText}
-              onChangeText={setMessageText}
+              onChangeText={(t) => {
+                setMessageText(t);
+                socket.send('typing_status', { isTyping: t.length > 0 });
+              }}
               onSubmitEditing={handleSendMessage}
             />
           </View>

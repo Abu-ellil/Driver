@@ -5,6 +5,7 @@ import { Screen } from './types';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { NotificationProvider } from './context/NotificationContext';
 import { ConnectivityProvider, useConnectivity } from './context/ConnectivityContext';
+import { WebSocketProvider } from './context/WebSocketContext';
 import DashboardScreen from './screens/DashboardScreen';
 import LoginScreen from './screens/LoginScreen';
 import OrdersScreen from './screens/OrdersScreen';
@@ -86,9 +87,11 @@ const Main: React.FC = () => {
 const App: React.FC = () => (
   <ThemeProvider>
     <ConnectivityProvider>
-      <NotificationProvider>
-        <Main />
-      </NotificationProvider>
+      <WebSocketProvider>
+        <NotificationProvider>
+          <Main />
+        </NotificationProvider>
+      </WebSocketProvider>
     </ConnectivityProvider>
   </ThemeProvider>
 );

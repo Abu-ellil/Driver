@@ -1,10 +1,13 @@
-
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, Dimensions, Animated, Easing, ActivityIndicator } from 'react-native';
 import { Screen } from '../types';
 import { useTheme } from '../context/ThemeContext';
 
 const { width } = Dimensions.get('window');
+
+const ROUTE_PATH = "M 75 25 C 70 25, 65 30, 60 30 L 50 30 C 45 30, 45 35, 45 40 L 45 55 C 45 60, 40 60, 35 60 L 25 60 C 20 60, 15 75";
+
+const AnimatedPath = Animated.createAnimatedComponent('path' as any);
 
 interface OrderDetailsScreenProps {
   onNavigate: (s: Screen) => void;
@@ -13,19 +16,46 @@ interface OrderDetailsScreenProps {
 const OrderDetailsScreen: React.FC<OrderDetailsScreenProps> = ({ onNavigate }) => {
   const { colors } = useTheme();
   const [isStarting, setIsStarting] = useState(false);
+  const [pathLength, setPathLength] = useState(0);
+  const pathRef = useRef<SVGPathElement>(null);
   
-  // Animation values
   const routeAnim = useRef(new Animated.Value(0)).current;
+  const flowAnim = useRef(new Animated.Value(0)).current;
   const pickupScale = useRef(new Animated.Value(1)).current;
   const deliveryScale = useRef(new Animated.Value(0)).current;
   const deliveryOpacity = useRef(new Animated.Value(0)).current;
   const buttonWidth = useRef(new Animated.Value(width - 50)).current;
   const successOpacity = useRef(new Animated.Value(0)).current;
 
+  // Pulse animations
+  const pickupPulseScale = useRef(new Animated.Value(1)).current;
+  const pickupPulseOpacity = useRef(new Animated.Value(0.6)).current;
+  const deliveryPulseScale = useRef(new Animated.Value(1)).current;
+  const deliveryPulseOpacity = useRef(new Animated.Value(0.6)).current;
+
+  useEffect(() => {
+    if (pathRef.current) {
+      setPathLength(pathRef.current.getTotalLength());
+    }
+
+    // Start pickup pulse immediately
+    Animated.loop(
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(pickupPulseScale, { toValue: 2.2, duration: 1500, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+          Animated.timing(pickupPulseOpacity, { toValue: 0, duration: 1500, useNativeDriver: true })
+        ]),
+        Animated.parallel([
+          Animated.timing(pickupPulseScale, { toValue: 1, duration: 0, useNativeDriver: true }),
+          Animated.timing(pickupPulseOpacity, { toValue: 0.6, duration: 0, useNativeDriver: true })
+        ])
+      ])
+    ).start();
+  }, []);
+
   const startTripAnimation = () => {
     setIsStarting(true);
     
-    // Animate button contraction
     Animated.timing(buttonWidth, {
       toValue: 64,
       duration: 400,
@@ -33,65 +63,92 @@ const OrderDetailsScreen: React.FC<OrderDetailsScreenProps> = ({ onNavigate }) =
       useNativeDriver: false,
     }).start();
 
-    // Sequence: 
-    // 1. Pickup pulses to indicate activity
-    // 2. Line draws from pickup to delivery
-    // 3. Delivery point pops in
-    // 4. Success state shows briefly before navigation
+    routeAnim.setValue(0);
+    deliveryOpacity.setValue(0);
+    deliveryScale.setValue(0);
+
     Animated.sequence([
       Animated.parallel([
         Animated.timing(routeAnim, {
           toValue: 1,
-          duration: 800, // Faster route drawing
+          duration: 1800,
           easing: Easing.out(Easing.quad),
           useNativeDriver: false,
         }),
+        Animated.loop(
+          Animated.sequence([
+            Animated.timing(pickupScale, { toValue: 1.2, duration: 450, useNativeDriver: true }),
+            Animated.timing(pickupScale, { toValue: 1, duration: 450, useNativeDriver: true }),
+          ]),
+          { iterations: 2 }
+        )
+      ]),
+      Animated.parallel([
         Animated.timing(deliveryOpacity, {
           toValue: 1,
           duration: 400,
-          delay: 500, // Adjusted delay for faster sequence
-          useNativeDriver: false,
+          useNativeDriver: true,
         }),
         Animated.spring(deliveryScale, {
           toValue: 1,
           friction: 4,
           tension: 40,
-          delay: 600, // Adjusted delay for faster sequence
-          useNativeDriver: false,
+          useNativeDriver: true,
         }),
-        Animated.loop(
-          Animated.sequence([
-            Animated.timing(pickupScale, { toValue: 1.15, duration: 300, useNativeDriver: false }),
-            Animated.timing(pickupScale, { toValue: 1, duration: 300, useNativeDriver: false }),
-          ]),
-          { iterations: 2 }
-        )
       ]),
       Animated.timing(successOpacity, {
         toValue: 1,
-        duration: 300,
-        useNativeDriver: false,
+        duration: 400,
+        useNativeDriver: true,
       })
     ]).start(() => {
+      // Start flow animation
+      Animated.loop(
+        Animated.timing(flowAnim, {
+          toValue: 1,
+          duration: 2000,
+          easing: Easing.linear,
+          useNativeDriver: false
+        })
+      ).start();
+
+      // Start delivery pulse
+      Animated.loop(
+        Animated.sequence([
+          Animated.parallel([
+            Animated.timing(deliveryPulseScale, { toValue: 2.2, duration: 1500, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+            Animated.timing(deliveryPulseOpacity, { toValue: 0, duration: 1500, useNativeDriver: true })
+          ]),
+          Animated.parallel([
+            Animated.timing(deliveryPulseScale, { toValue: 1, duration: 0, useNativeDriver: true }),
+            Animated.timing(deliveryPulseOpacity, { toValue: 0.6, duration: 0, useNativeDriver: true })
+          ])
+        ])
+      ).start();
+
       setTimeout(() => {
         onNavigate(Screen.ACTIVE_TRIP);
-      }, 400);
+      }, 1200);
     });
   };
 
-  // Line animation interpolation
-  const lineWidth = routeAnim.interpolate({
+  const dashOffset = routeAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['0%', '35%'], 
+    outputRange: [pathLength || 1000, 0], 
+  });
+
+  const flowOffset = flowAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, -20]
   });
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Map Section */}
       <View style={styles.mapContainer}>
+        {/* Cast style to any to fix ImageStyle union errors */}
         <Image 
           source={{ uri: "https://lh3.googleusercontent.com/aida-public/AB6AXuDZNpZ0yW6Jk_mbrQsUXjdhchRAaGGzpZHCJ87D3z3wP6DzEOyyUys0ZwivDdnCIylYt6zuAvmTeB_uREnwHQDN3zOCL3vpy_2zazDbOtOmmUpayjOI2fU52sK4OMGHHhaTvsmKOt4J12TJI1UlvWRR3fEWuVToiGYwT_yuEoPB9_OmjVKPSZoiSzQ5202hdMTfzRqc0JeQnOPqqwwJb1OuKvC1qVxtZgaWhmyUrVNLxxnDOWJGTZ2fGg-NZ-JO-hLzOIU2YaJAPA" }}
-          style={styles.mapImage}
+          style={styles.mapImage as any}
         />
         <View style={styles.mapOverlay} />
         
@@ -104,8 +161,39 @@ const OrderDetailsScreen: React.FC<OrderDetailsScreenProps> = ({ onNavigate }) =
            </View>
         </View>
 
-        {/* Pickup Waypoint */}
-        <Animated.View style={[styles.waypoint, { top: '35%', left: '55%', transform: [{ scale: pickupScale }] }]}>
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+          <svg width="100%" height="100%" viewBox="0 0 100 100" style={{ position: 'absolute' }}>
+            <defs>
+              <linearGradient id="routeGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor={colors.primary} />
+                <stop offset="100%" stopColor="#10b981" />
+              </linearGradient>
+            </defs>
+            <path 
+              d={ROUTE_PATH} 
+              fill="none" 
+              stroke="rgba(0,0,0,0.1)" 
+              strokeWidth="2.5" 
+              strokeLinecap="round" 
+            />
+            <AnimatedPath
+              ref={pathRef}
+              d={ROUTE_PATH}
+              fill="none"
+              stroke="url(#routeGradient)"
+              strokeWidth="2.8"
+              strokeLinecap="round"
+              strokeDasharray={isStarting ? [10, 5] : pathLength}
+              style={{ 
+                strokeDashoffset: isStarting && flowAnim ? Animated.add(dashOffset as any, flowOffset as any) : dashOffset as any 
+              }}
+            />
+          </svg>
+        </View>
+
+        {/* Pickup Pulse */}
+        <Animated.View style={[styles.waypointPulse, { top: '25%', left: '75%', backgroundColor: colors.primary, opacity: pickupPulseOpacity, transform: [{ scale: pickupPulseScale }] }]} />
+        <Animated.View style={[styles.waypoint, { top: '25%', left: '75%', transform: [{ scale: pickupScale }] }]}>
            <View style={[styles.waypointCircle, { backgroundColor: colors.primary }]}>
              <Text style={styles.waypointText}>1</Text>
            </View>
@@ -114,25 +202,23 @@ const OrderDetailsScreen: React.FC<OrderDetailsScreenProps> = ({ onNavigate }) =
            </View>
         </Animated.View>
 
-        {/* Animated Route Line */}
+        {/* Delivery Pulse - Added as any to fix incorrect overload matching */}
         <Animated.View style={[
-          styles.routeLine, 
+          styles.waypointPulse, 
           { 
-            backgroundColor: colors.primary, 
-            width: lineWidth,
-            top: '38%',
-            left: '25%',
-            transform: [{ rotate: '-12deg' }]
+            top: '75%', 
+            left: '15%', 
+            backgroundColor: '#ef4444', 
+            opacity: Animated.multiply(deliveryOpacity, deliveryPulseOpacity), 
+            transform: [{ scale: deliveryPulseScale }] 
           }
-        ]} />
-
-        {/* Delivery Waypoint */}
+        ] as any} />
         <Animated.View style={[
           styles.waypoint, 
           { 
-            top: '42%', 
-            left: '20%', 
-            opacity: deliveryOpacity,
+            top: '75%', 
+            left: '15%', 
+            opacity: deliveryOpacity, 
             transform: [{ scale: deliveryScale }] 
           }
         ]}>
@@ -144,14 +230,12 @@ const OrderDetailsScreen: React.FC<OrderDetailsScreenProps> = ({ onNavigate }) =
            </View>
         </Animated.View>
 
-        {/* Global Success Overlay */}
         <Animated.View style={[styles.successOverlay, { opacity: successOpacity, backgroundColor: colors.primarySoft }]}>
           <Text style={[styles.successIcon, { color: colors.primary }]}>check_circle</Text>
           <Text style={[styles.successText, { color: colors.primary }]}>تم قبول الرحلة</Text>
         </Animated.View>
       </View>
 
-      {/* Details Sheet */}
       <View style={[styles.sheet, { backgroundColor: colors.surface }]}>
         <View style={styles.sheetHandle} />
         
@@ -184,15 +268,13 @@ const OrderDetailsScreen: React.FC<OrderDetailsScreenProps> = ({ onNavigate }) =
                     <Text style={[styles.ratingValue, { color: colors.subtext }]}>٤.٨ (١٢٠ طلب)</Text>
                   </View>
               </View>
+              {/* Cast style to any to fix ImageStyle union errors */}
               <Image 
                   source={{ uri: "https://lh3.googleusercontent.com/aida-public/AB6AXuAz9lwkz5CPv8Rw8IFJjMlD-SJ0SAMkSlEcegcP4mVyUWwqOnDD4fYJu0mgm7ZuI4Rzaz6fN90bUY5cPoUxE5-TYfYcPrwRtjlyAOYU2dJyjk4Bkx0dkBX-F_3DM39LYsvfOfbn2gb6cjuAgQ546Nn8R8tGd-Y12l3fqFjQ7kQgDZgsDSYD8czqCtQfEwyMOHnTHK-T8Wyt90UTm_VSLnkqObm6Iinr-B6796wsovXN8olHNP_WjHnOQ039n6o51ZSm2_lr8gSKsQ" }}
-                  style={styles.customerAvatar}
+                  style={styles.customerAvatar as any}
               />
             </View>
-            <TouchableOpacity 
-              style={[styles.contactBtn, { backgroundColor: colors.primarySoft, borderColor: colors.primary }]}
-              onPress={() => onNavigate(Screen.CHAT)}
-            >
+            <TouchableOpacity style={[styles.contactBtn, { backgroundColor: colors.primarySoft, borderColor: colors.primary }]} onPress={() => onNavigate(Screen.CHAT)}>
               <Text style={[styles.contactBtnIcon, { color: colors.primary }]}>chat_bubble</Text>
               <Text style={[styles.contactBtnText, { color: colors.primary }]}>تواصل مع العميل</Text>
             </TouchableOpacity>
@@ -215,7 +297,8 @@ const OrderDetailsScreen: React.FC<OrderDetailsScreenProps> = ({ onNavigate }) =
                <View style={[styles.itemDivider, { backgroundColor: colors.border }]} />
                <View style={styles.itemRow}>
                   <Text style={[styles.itemQty, { color: colors.primary }]}>x١</Text>
-                  <Text style={[styles.itemName, { color: colors.text }]}>ماك فلوري أوريو</Text>
+                  {/* Cast style to any to fix incorrect overload matching */}
+                  <Text style={[styles.itemName, { color: colors.text }] as any}>ماك فلوري أوريو</Text>
                </View>
             </View>
           </View>
@@ -242,7 +325,6 @@ const OrderDetailsScreen: React.FC<OrderDetailsScreenProps> = ({ onNavigate }) =
           </View>
         </ScrollView>
 
-        {/* Footer Swipe Action */}
         <View style={[styles.footer, { borderTopColor: colors.border, backgroundColor: colors.surface }]}>
            <Animated.View style={{ width: buttonWidth, alignSelf: 'center' }}>
             <TouchableOpacity 
@@ -279,12 +361,12 @@ const styles = StyleSheet.create({
   backIcon: { fontFamily: 'Material Icons Round', color: '#fff', fontSize: 24 },
   timePill: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
   timePillText: { color: '#fff', fontSize: 12, fontWeight: 'bold', fontFamily: 'Cairo' },
-  waypoint: { position: 'absolute', alignItems: 'center', zIndex: 5 },
+  waypoint: { position: 'absolute', alignItems: 'center', zIndex: 6, transform: [{translateX: -16}, {translateY: -16}] },
+  waypointPulse: { position: 'absolute', width: 40, height: 40, borderRadius: 20, zIndex: 5, marginLeft: -20, marginTop: -20 },
   waypointCircle: { width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#0d1a12', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 3 },
   waypointText: { color: '#0d1a12', fontWeight: '900', fontSize: 16 },
   waypointLabel: { marginTop: 4, backgroundColor: 'rgba(26,46,34,0.95)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
   waypointLabelText: { color: '#fff', fontSize: 10, fontWeight: 'bold', fontFamily: 'Cairo' },
-  routeLine: { position: 'absolute', height: 4, borderRadius: 2, zIndex: 4, shadowColor: '#19e66b', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.6, shadowRadius: 6 },
   successOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 50, justifyContent: 'center', alignItems: 'center' },
   successIcon: { fontFamily: 'Material Icons Round', fontSize: 80, marginBottom: 12 },
   successText: { fontSize: 24, fontWeight: 'bold', fontFamily: 'Cairo' },
