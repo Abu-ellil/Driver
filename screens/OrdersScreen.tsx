@@ -1,10 +1,11 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, Modal, TextInput, Animated, Image, Dimensions, Easing } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, Modal, TextInput, Animated, Image, Dimensions, Easing, LayoutChangeEvent } from 'react-native';
 import { Screen, Order } from '../types';
 import { useTheme } from '../context/ThemeContext';
+import { useWebSocket } from '../context/WebSocketContext';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const INITIAL_ORDERS: Order[] = [
   { id: '1', price: '45.50', stores: ['برجر بالاس'], distance: '3.2', time: '25', type: 'Multi', status: 'Available' },
@@ -30,15 +31,15 @@ const getStoreIcon = (name: string) => {
   return 'storefront';
 };
 
-const MOCK_MARKERS = [
-  { id: '1', top: 30, right: 20 },
-  { id: '1b', top: 30, right: 20 },
-  { id: '2', top: 45, right: 62 },
-  { id: '3', top: 72, right: 35 },
-  { id: '4', top: 25, right: 75 },
-  { id: '5', top: 62, right: 18 },
-  { id: '6', top: 15, right: 42 },
-];
+const MOCK_MARKER_POSITIONS: Record<string, { top: number, right: number }> = {
+  '1': { top: 30, right: 20 },
+  '1b': { top: 30, right: 20 },
+  '2': { top: 45, right: 62 },
+  '3': { top: 72, right: 35 },
+  '4': { top: 25, right: 75 },
+  '5': { top: 62, right: 18 },
+  '6': { top: 15, right: 42 },
+};
 
 interface OrdersScreenProps {
   onNavigate: (s: Screen) => void;
@@ -46,6 +47,8 @@ interface OrdersScreenProps {
 
 const OrdersScreen: React.FC<OrdersScreenProps> = ({ onNavigate }) => {
   const { colors, mode } = useTheme();
+  const { socket } = useWebSocket();
+  const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS);
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
   const [sortBy, setSortBy] = useState<'price' | 'distance' | 'time'>('price');
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -57,8 +60,39 @@ const OrdersScreen: React.FC<OrdersScreenProps> = ({ onNavigate }) => {
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
   const [hasPendingFeedback, setHasPendingFeedback] = useState(true);
 
+  // Animation values
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const tooltipScale = useRef(new Animated.Value(0)).current;
+  const mapScale = useRef(new Animated.Value(1)).current;
+  const mapTranslateX = useRef(new Animated.Value(0)).current;
+  const mapTranslateY = useRef(new Animated.Value(0)).current;
+  
+  const mapLayout = useRef({ width: SCREEN_WIDTH, height: SCREEN_HEIGHT }).current;
+
+  // Real-time WebSocket Listeners
+  useEffect(() => {
+    const handleOrderTaken = (data: { orderId: string }) => {
+      setOrders(current => current.filter(o => o.id !== data.orderId));
+      if (selectedMarkerIndex !== null) {
+        setSelectedMarkerIndex(null);
+      }
+    };
+
+    const handleNewOrder = (newOrder: Order) => {
+      setOrders(current => {
+        if (current.find(o => o.id === newOrder.id)) return current;
+        return [newOrder, ...current];
+      });
+    };
+
+    const offOrderTaken = socket.on('order_taken', handleOrderTaken);
+    const offNewOrder = socket.on('new_order', handleNewOrder);
+
+    return () => {
+      offOrderTaken();
+      offNewOrder();
+    };
+  }, [socket, selectedMarkerIndex]);
 
   useEffect(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
@@ -71,14 +105,46 @@ const OrdersScreen: React.FC<OrdersScreenProps> = ({ onNavigate }) => {
     }
   }, [selectedMarkerIndex]);
 
+  const onMapLayout = (e: LayoutChangeEvent) => {
+    mapLayout.width = e.nativeEvent.layout.width;
+    mapLayout.height = e.nativeEvent.layout.height;
+  };
+
+  const animateMap = (toScale: number, toX: number, toY: number) => {
+    Animated.parallel([
+      Animated.spring(mapScale, { 
+        toValue: toScale, 
+        friction: 9, 
+        tension: 35, 
+        useNativeDriver: true 
+      }),
+      Animated.spring(mapTranslateX, { 
+        toValue: toX, 
+        friction: 9, 
+        tension: 35, 
+        useNativeDriver: true 
+      }),
+      Animated.spring(mapTranslateY, { 
+        toValue: toY, 
+        friction: 9, 
+        tension: 35, 
+        useNativeDriver: true 
+      }),
+    ]).start();
+  };
+
   const toggleView = () => {
     fadeAnim.setValue(0);
     setSelectedMarkerIndex(null);
+    if (viewMode === 'map') {
+      animateMap(1, 0, 0);
+      setZoomLevel(1);
+    }
     setViewMode(prev => prev === 'list' ? 'map' : 'list');
   };
 
   const filteredAndSortedOrders = useMemo(() => {
-    let result = [...INITIAL_ORDERS];
+    let result = [...orders];
     result.sort((a, b) => {
       if (sortBy === 'price') return parseFloat(b.price) - parseFloat(a.price);
       if (sortBy === 'distance') return parseFloat(a.distance) - parseFloat(b.distance);
@@ -86,14 +152,17 @@ const OrdersScreen: React.FC<OrdersScreenProps> = ({ onNavigate }) => {
       return 0;
     });
     return result;
-  }, [sortBy]);
+  }, [orders, sortBy]);
 
   const clusters = useMemo(() => {
     const CLUSTER_THRESHOLD = 15 / zoomLevel; 
     const groups: { orders: Order[], top: number, right: number, isSameStore: boolean, storeName: string }[] = [];
 
     filteredAndSortedOrders.forEach(order => {
-      const pos = MOCK_MARKERS.find(m => m.id === order.id) || MOCK_MARKERS[0];
+      const pos = MOCK_MARKER_POSITIONS[order.id] || { 
+        top: 20 + (parseInt(order.id, 36) % 60), 
+        right: 15 + (parseInt(order.id, 36) % 70) 
+      };
       
       let addedToCluster = false;
       for (const group of groups) {
@@ -123,11 +192,34 @@ const OrdersScreen: React.FC<OrdersScreenProps> = ({ onNavigate }) => {
   }, [filteredAndSortedOrders, zoomLevel]);
 
   const handleMarkerPress = (index: number) => {
-    if (selectedMarkerIndex === index) {
+    const cluster = clusters[index];
+    const isCluster = cluster.orders.length > 1;
+
+    if (selectedMarkerIndex === index && !isCluster) {
       setSelectedMarkerIndex(null);
+      animateMap(zoomLevel, 0, 0);
     } else {
       setSelectedMarkerIndex(index);
+      
+      // If it's a cluster, zoom in significantly to "expand" it
+      const targetZoom = isCluster ? Math.min(zoomLevel + 0.8, 3) : Math.max(zoomLevel, 1.3);
+      
+      const markerX = mapLayout.width - (mapLayout.width * cluster.right / 100);
+      const markerY = mapLayout.height * cluster.top / 100;
+      
+      const targetX = (mapLayout.width / 2) / targetZoom - markerX;
+      const targetY = (mapLayout.height / 2) / targetZoom - markerY;
+
+      setZoomLevel(targetZoom);
+      animateMap(targetZoom, targetX, targetY);
     }
+  };
+
+  const handleZoom = (delta: number) => {
+    const newZoom = Math.max(1, Math.min(zoomLevel + delta, 3));
+    setZoomLevel(newZoom);
+    setSelectedMarkerIndex(null);
+    animateMap(newZoom, 0, 0);
   };
 
   const toggleTag = (tag: string) => {
@@ -174,72 +266,108 @@ const OrdersScreen: React.FC<OrdersScreenProps> = ({ onNavigate }) => {
   );
 
   const renderMapView = () => (
-    <Animated.View style={[styles.mapViewContainer, { opacity: fadeAnim }]}>
-      <Image source={{ uri: "https://lh3.googleusercontent.com/aida-public/AB6AXuDZNpZ0yW6Jk_mbrQsUXjdhchRAaGGzpZHCJ87D3z3wP6DzEOyyUys0ZwivDdnCIylYt6zuAvmTeB_uREnwHQDN3zOCL3vpy_2zazDbOtOmmUpayjOI2fU52sK4OMGHHhaTvsmKOt4J12TJI1UlvWRR3fEWuVToiGYwT_yuEoPB9_OmjVKPSZoiSzQ5202hdMTfzRqc0JeQnOPqqwwJb1OuKvC1qVxtZgaWhmyUrVNLxxnDOWJGTZ2fGg-NZ-JO-hLzOIU2YaJAPA" }} style={[styles.mapImageLarge, { transform: [{ scale: 1 + (zoomLevel - 1) * 0.1 }] }]} />
-      <View style={styles.mapOverlay} />
-      
-      {clusters.map((cluster, index) => {
-        const isCluster = cluster.orders.length > 1;
-        const totalEarning = cluster.orders.reduce((sum, o) => sum + parseFloat(o.price), 0);
-        const mainOrder = cluster.orders[0];
-        const isSelected = selectedMarkerIndex === index;
+    <Animated.View 
+      style={[styles.mapViewContainer, { opacity: fadeAnim }]}
+      onLayout={onMapLayout}
+    >
+      <Animated.View style={[
+        styles.mapContentWrapper, 
+        { 
+          transform: [
+            { scale: mapScale },
+            { translateX: mapTranslateX },
+            { translateY: mapTranslateY }
+          ] 
+        }
+      ]}>
+        <Image 
+          source={{ uri: "https://lh3.googleusercontent.com/aida-public/AB6AXuDZNpZ0yW6Jk_mbrQsUXjdhchRAaGGzpZHCJ87D3z3wP6DzEOyyUys0ZwivDdnCIylYt6zuAvmTeB_uREnwHQDN3zOCL3vpy_2zazDbOtOmmUpayjOI2fU52sK4OMGHHhaTvsmKOt4J12TJI1UlvWRR3fEWuVToiGYwT_yuEoPB9_OmjVKPSZoiSzQ5202hdMTfzRqc0JeQnOPqqwwJb1OuKvC1qVxtZgaWhmyUrVNLxxnDOWJGTZ2fGg-NZ-JO-hLzOIU2YaJAPA" }} 
+          style={styles.mapImageLarge} 
+        />
+        <View style={styles.mapOverlay} />
+        
+        {clusters.map((cluster, index) => {
+          const isCluster = cluster.orders.length > 1;
+          const totalEarning = cluster.orders.reduce((sum, o) => sum + parseFloat(o.price), 0);
+          const mainOrder = cluster.orders[0];
+          const isSelected = selectedMarkerIndex === index;
 
-        return (
-          <TouchableOpacity 
-            key={`marker-group-${index}`}
-            activeOpacity={0.9}
-            style={[styles.markerContainer, { top: `${cluster.top}%`, right: `${cluster.right}%` }]}
-            onPress={() => handleMarkerPress(index)}
-          >
-            {isSelected && (
-              <Animated.View style={[styles.calloutContainer, { backgroundColor: colors.surface, borderColor: colors.primary, transform: [{ scale: tooltipScale }, { translateY: -85 }] }]}>
-                <View style={styles.calloutContent}>
-                  <Text style={[styles.calloutStoreName, { color: colors.text }]}>{isCluster ? (cluster.isSameStore ? `من متجر ${cluster.storeName}` : 'مجموعة طلبات') : mainOrder.stores[0]}</Text>
-                  <View style={styles.calloutPriceRow}>
-                    <Text style={[styles.calloutPrice, { color: colors.primary }]}>{totalEarning.toFixed(2)} <Text style={styles.calloutCurrency}>ر.س</Text></Text>
-                    {isCluster && <Text style={[styles.calloutCount, { color: colors.subtext }]}>{cluster.orders.length} طلبات</Text>}
+          const counterScale = mapScale.interpolate({
+            inputRange: [1, 3],
+            outputRange: [1, 0.6],
+            extrapolate: 'clamp'
+          });
+
+          return (
+            <TouchableOpacity 
+              key={`marker-group-${index}`}
+              activeOpacity={0.9}
+              style={[styles.markerContainer, { top: `${cluster.top}%`, right: `${cluster.right}%` }]}
+              onPress={() => handleMarkerPress(index)}
+            >
+              {isSelected && (
+                <Animated.View style={[
+                  styles.calloutContainer, 
+                  { 
+                    backgroundColor: colors.surface, 
+                    borderColor: colors.primary, 
+                    transform: [
+                      { scale: tooltipScale }, 
+                      { translateY: -85 },
+                      { scale: counterScale }
+                    ] 
+                  }
+                ]}>
+                  <View style={styles.calloutContent}>
+                    <Text style={[styles.calloutStoreName, { color: colors.text }]}>{isCluster ? (cluster.isSameStore ? `من متجر ${cluster.storeName}` : 'مجموعة طلبات') : mainOrder.stores[0]}</Text>
+                    <View style={styles.calloutPriceRow}>
+                      <Text style={[styles.calloutPrice, { color: colors.primary }]}>{totalEarning.toFixed(2)} <Text style={styles.calloutCurrency}>ر.س</Text></Text>
+                      {isCluster && <Text style={[styles.calloutCount, { color: colors.subtext }]}>{cluster.orders.length} طلبات</Text>}
+                    </View>
+                    <TouchableOpacity style={[styles.calloutAction, { backgroundColor: colors.primary }]} onPress={() => onNavigate(Screen.ORDER_DETAILS)}>
+                      <Text style={styles.calloutActionText}>عرض التفاصيل</Text>
+                    </TouchableOpacity>
                   </View>
-                  <TouchableOpacity style={[styles.calloutAction, { backgroundColor: colors.primary }]} onPress={() => onNavigate(Screen.ORDER_DETAILS)}>
-                    <Text style={styles.calloutActionText}>عرض التفاصيل</Text>
-                  </TouchableOpacity>
-                </View>
-                <View style={[styles.tooltipArrow, { borderTopColor: colors.primary }]} />
-              </Animated.View>
-            )}
+                  <View style={[styles.tooltipArrow, { borderTopColor: colors.primary }]} />
+                </Animated.View>
+              )}
 
-            {isCluster ? (
-              <View style={[
-                styles.clusterMarker, 
-                { 
-                  backgroundColor: cluster.isSameStore ? colors.primary : '#2563eb', 
-                  borderColor: colors.surface,
-                  transform: [{ scale: isSelected ? 1.2 : 1 }]
-                }
-              ]}>
-                <Text style={styles.clusterText}>{cluster.orders.length}</Text>
-                {cluster.isSameStore && (
-                  <Text style={[styles.miniStoreIcon, { color: '#112117' }]}>{getStoreIcon(cluster.storeName)}</Text>
+              <Animated.View style={{ transform: [{ scale: counterScale }] }}>
+                {isCluster ? (
+                  <View style={[
+                    styles.clusterMarker, 
+                    { 
+                      backgroundColor: cluster.isSameStore ? colors.primary : '#2563eb', 
+                      borderColor: colors.surface,
+                      transform: [{ scale: isSelected ? 1.2 : 1 }]
+                    }
+                  ]}>
+                    <Text style={styles.clusterText}>{cluster.orders.length}</Text>
+                    {cluster.isSameStore && (
+                      <Text style={[styles.miniStoreIcon, { color: '#112117' }]}>{getStoreIcon(cluster.storeName)}</Text>
+                    )}
+                    <View style={[styles.clusterPulse, { borderColor: cluster.isSameStore ? colors.primary : '#2563eb' }]} />
+                  </View>
+                ) : (
+                  <View style={[styles.markerBubble, { backgroundColor: colors.surface, borderColor: isSelected ? colors.primary : colors.border, transform: [{ scale: isSelected ? 1.15 : 1 }] }]}>
+                    <Text style={[styles.markerPrice, { color: isSelected ? colors.primary : colors.text }]}>{mainOrder.price}</Text>
+                    <View style={[styles.markerIconBox, { backgroundColor: isSelected ? colors.primary : colors.surfaceAlt }]}>
+                        <Text style={[styles.markerIcon, { color: isSelected ? '#112117' : colors.primary }]}>{getStoreIcon(mainOrder.stores[0])}</Text>
+                    </View>
+                    <View style={[styles.markerTail, { borderTopColor: isSelected ? colors.primary : colors.border }]} />
+                  </View>
                 )}
-                <View style={[styles.clusterPulse, { borderColor: cluster.isSameStore ? colors.primary : '#2563eb' }]} />
-              </View>
-            ) : (
-              <View style={[styles.markerBubble, { backgroundColor: colors.surface, borderColor: isSelected ? colors.primary : colors.border, transform: [{ scale: isSelected ? 1.15 : 1 }] }]}>
-                 <Text style={[styles.markerPrice, { color: isSelected ? colors.primary : colors.text }]}>{mainOrder.price}</Text>
-                 <View style={[styles.markerIconBox, { backgroundColor: isSelected ? colors.primary : colors.surfaceAlt }]}>
-                    <Text style={[styles.markerIcon, { color: isSelected ? '#112117' : colors.primary }]}>{getStoreIcon(mainOrder.stores[0])}</Text>
-                 </View>
-                 <View style={[styles.markerTail, { borderTopColor: isSelected ? colors.primary : colors.border }]} />
-              </View>
-            )}
-          </TouchableOpacity>
-        );
-      })}
+              </Animated.View>
+            </TouchableOpacity>
+          );
+        })}
+      </Animated.View>
 
       <View style={styles.mapControls}>
-        <TouchableOpacity style={[styles.mapCtrlBtn, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => { setZoomLevel(prev => Math.min(prev + 1, 3)); setSelectedMarkerIndex(null); }}><Text style={[styles.mapCtrlIcon, { color: colors.text }]}>add</Text></TouchableOpacity>
-        <TouchableOpacity style={[styles.mapCtrlBtn, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => { setZoomLevel(prev => Math.max(prev - 1, 1)); setSelectedMarkerIndex(null); }}><Text style={[styles.mapCtrlIcon, { color: colors.text }]}>remove</Text></TouchableOpacity>
+        <TouchableOpacity style={[styles.mapCtrlBtn, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => handleZoom(0.5)}><Text style={[styles.mapCtrlIcon, { color: colors.text }]}>add</Text></TouchableOpacity>
+        <TouchableOpacity style={[styles.mapCtrlBtn, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => handleZoom(-0.5)}><Text style={[styles.mapCtrlIcon, { color: colors.text }]}>remove</Text></TouchableOpacity>
       </View>
-      <View style={styles.mapFloatingInfo}><View style={[styles.infoPill, { backgroundColor: colors.surface, borderColor: colors.border }]}><Text style={[styles.infoPillText, { color: colors.text }]}>{filteredAndSortedOrders.length} طلبات متاحة • مستوى الزوم {zoomLevel}</Text></View></View>
+      <View style={styles.mapFloatingInfo}><View style={[styles.infoPill, { backgroundColor: colors.surface, borderColor: colors.border }]}><Text style={[styles.infoPillText, { color: colors.text }]}>{filteredAndSortedOrders.length} طلبات متاحة</Text></View></View>
     </Animated.View>
   );
 
@@ -355,7 +483,8 @@ const styles = StyleSheet.create({
   detailsButton: { height: 54, borderRadius: 16, flexDirection: 'row-reverse', justifyContent: 'center', alignItems: 'center' },
   detailsButtonText: { fontWeight: '900', fontSize: 16, marginLeft: 8, fontFamily: 'Cairo' },
   detailsButtonIcon: { fontFamily: 'Material Icons Round', fontSize: 20 },
-  mapViewContainer: { flex: 1, position: 'relative' },
+  mapViewContainer: { flex: 1, position: 'relative', overflow: 'hidden' },
+  mapContentWrapper: { flex: 1, position: 'relative' },
   mapImageLarge: { width: '100%', height: '100%', opacity: 0.5 },
   mapOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.1)' },
   markerContainer: { position: 'absolute', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
@@ -378,10 +507,10 @@ const styles = StyleSheet.create({
   calloutAction: { width: '100%', height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
   calloutActionText: { color: '#112117', fontSize: 12, fontWeight: 'bold', fontFamily: 'Cairo' },
   tooltipArrow: { position: 'absolute', bottom: -9, width: 0, height: 0, borderLeftWidth: 9, borderRightWidth: 9, borderTopWidth: 9, borderLeftColor: 'transparent', borderRightColor: 'transparent' },
-  mapControls: { position: 'absolute', right: 20, top: 20, gap: 10 },
+  mapControls: { position: 'absolute', right: 20, top: 20, gap: 10, zIndex: 20 },
   mapCtrlBtn: { width: 44, height: 44, borderRadius: 12, borderWidth: 1, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 5 },
   mapCtrlIcon: { fontFamily: 'Material Icons Round', fontSize: 24 },
-  mapFloatingInfo: { position: 'absolute', bottom: 100, alignSelf: 'center' },
+  mapFloatingInfo: { position: 'absolute', bottom: 100, alignSelf: 'center', zIndex: 20 },
   infoPill: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 25, borderWidth: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 5 },
   infoPillText: { fontSize: 13, fontWeight: 'bold', fontFamily: 'Cairo' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
