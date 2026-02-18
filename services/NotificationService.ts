@@ -1,5 +1,6 @@
 
 import { Notification } from '../types';
+import { StorageService } from './StorageService';
 
 /**
  * Mock Backend Service to simulate push notification synchronization.
@@ -13,9 +14,17 @@ export const NotificationService = {
   // Simulate fetching notifications from a remote server
   async fetchRemoteNotifications(): Promise<Notification[]> {
     return new Promise((resolve) => {
-      setTimeout(() => {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        const notifications: Notification[] = stored ? JSON.parse(stored) : [];
+      setTimeout(async () => {
+        const stored = await StorageService.getItem(STORAGE_KEY);
+        let notifications: Notification[] = [];
+
+        if (stored) {
+          try {
+            notifications = JSON.parse(stored) as Notification[];
+          } catch {
+            notifications = [];
+          }
+        }
         
         // Randomly simulate a "new" remote notification if the server has something new
         if (Math.random() > 0.7) {
@@ -28,7 +37,7 @@ export const NotificationService = {
             read: false,
           };
           const updated = [remoteNotif, ...notifications];
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+          await StorageService.setItem(STORAGE_KEY, JSON.stringify(updated));
           resolve(updated);
         } else {
           resolve(notifications);
@@ -41,8 +50,7 @@ export const NotificationService = {
   async syncToServer(notifications: Notification[]): Promise<void> {
     return new Promise((resolve) => {
       setTimeout(() => {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(notifications));
-        resolve();
+        StorageService.setItem(STORAGE_KEY, JSON.stringify(notifications)).finally(() => resolve());
       }, 500);
     });
   },

@@ -1,6 +1,9 @@
 
 import React, { useState } from 'react';
-import { View, StyleSheet, SafeAreaView, Dimensions, Platform, Text } from 'react-native';
+import { View, StyleSheet, Dimensions, Platform } from 'react-native';
+import Text from './components/IconText';
+import { useFonts } from 'expo-font';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Screen } from './types';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { NotificationProvider } from './context/NotificationContext';
@@ -84,17 +87,29 @@ const Main: React.FC = () => {
   );
 };
 
-const App: React.FC = () => (
-  <ThemeProvider>
-    <ConnectivityProvider>
-      <WebSocketProvider>
-        <NotificationProvider>
-          <Main />
-        </NotificationProvider>
-      </WebSocketProvider>
-    </ConnectivityProvider>
-  </ThemeProvider>
-);
+const App: React.FC = () => {
+  const [fontsLoaded] = useFonts({
+    'Material Icons Round': require('@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/MaterialIcons.ttf'),
+  });
+
+  if (!fontsLoaded) {
+    return null;
+  }
+
+  return (
+    <SafeAreaProvider>
+      <ThemeProvider>
+        <ConnectivityProvider>
+          <WebSocketProvider>
+            <NotificationProvider>
+              <Main />
+            </NotificationProvider>
+          </WebSocketProvider>
+        </ConnectivityProvider>
+      </ThemeProvider>
+    </SafeAreaProvider>
+  );
+};
 
 const styles = StyleSheet.create({
   container: {
@@ -135,3 +150,4 @@ const styles = StyleSheet.create({
 });
 
 export default App;
+

@@ -1,13 +1,16 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, Dimensions, Animated, Easing, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Image, ScrollView, Dimensions, Animated, Easing, ActivityIndicator } from 'react-native';
+import { Svg, Defs, LinearGradient, Stop, Path } from 'react-native-svg';
+import Text from '../components/IconText';
 import { Screen } from '../types';
 import { useTheme } from '../context/ThemeContext';
 
 const { width } = Dimensions.get('window');
+const DEFAULT_ROUTE_PATH_LENGTH = 220;
 
 const ROUTE_PATH = "M 75 25 C 70 25, 65 30, 60 30 L 50 30 C 45 30, 45 35, 45 40 L 45 55 C 45 60, 40 60, 35 60 L 25 60 C 20 60, 15 75";
 
-const AnimatedPath = Animated.createAnimatedComponent('path' as any);
+const AnimatedPath = Animated.createAnimatedComponent(Path as any);
 
 interface OrderDetailsScreenProps {
   onNavigate: (s: Screen) => void;
@@ -16,9 +19,6 @@ interface OrderDetailsScreenProps {
 const OrderDetailsScreen: React.FC<OrderDetailsScreenProps> = ({ onNavigate }) => {
   const { colors } = useTheme();
   const [isStarting, setIsStarting] = useState(false);
-  const [pathLength, setPathLength] = useState(0);
-  const pathRef = useRef<SVGPathElement>(null);
-  
   const routeAnim = useRef(new Animated.Value(0)).current;
   const flowAnim = useRef(new Animated.Value(0)).current;
   const pickupScale = useRef(new Animated.Value(1)).current;
@@ -34,10 +34,6 @@ const OrderDetailsScreen: React.FC<OrderDetailsScreenProps> = ({ onNavigate }) =
   const deliveryPulseOpacity = useRef(new Animated.Value(0.6)).current;
 
   useEffect(() => {
-    if (pathRef.current) {
-      setPathLength(pathRef.current.getTotalLength());
-    }
-
     // Start pickup pulse immediately
     Animated.loop(
       Animated.sequence([
@@ -134,7 +130,7 @@ const OrderDetailsScreen: React.FC<OrderDetailsScreenProps> = ({ onNavigate }) =
 
   const dashOffset = routeAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [pathLength || 1000, 0], 
+    outputRange: [DEFAULT_ROUTE_PATH_LENGTH, 0], 
   });
 
   const flowOffset = flowAnim.interpolate({
@@ -162,33 +158,30 @@ const OrderDetailsScreen: React.FC<OrderDetailsScreenProps> = ({ onNavigate }) =
         </View>
 
         <View style={StyleSheet.absoluteFill} pointerEvents="none">
-          <svg width="100%" height="100%" viewBox="0 0 100 100" style={{ position: 'absolute' }}>
-            <defs>
-              <linearGradient id="routeGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stopColor={colors.primary} />
-                <stop offset="100%" stopColor="#10b981" />
-              </linearGradient>
-            </defs>
-            <path 
-              d={ROUTE_PATH} 
-              fill="none" 
-              stroke="rgba(0,0,0,0.1)" 
-              strokeWidth="2.5" 
-              strokeLinecap="round" 
+          <Svg width="100%" height="100%" viewBox="0 0 100 100" style={{ position: 'absolute' }}>
+            <Defs>
+              <LinearGradient id="routeGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                <Stop offset="0%" stopColor={colors.primary} />
+                <Stop offset="100%" stopColor="#10b981" />
+              </LinearGradient>
+            </Defs>
+            <Path
+              d={ROUTE_PATH}
+              fill="none"
+              stroke="rgba(0,0,0,0.1)"
+              strokeWidth={2.5}
+              strokeLinecap="round"
             />
             <AnimatedPath
-              ref={pathRef}
               d={ROUTE_PATH}
               fill="none"
               stroke="url(#routeGradient)"
-              strokeWidth="2.8"
+              strokeWidth={2.8}
               strokeLinecap="round"
-              strokeDasharray={isStarting ? [10, 5] : pathLength}
-              style={{ 
-                strokeDashoffset: isStarting && flowAnim ? Animated.add(dashOffset as any, flowOffset as any) : dashOffset as any 
-              }}
+              strokeDasharray={isStarting ? [10, 5] : [DEFAULT_ROUTE_PATH_LENGTH, DEFAULT_ROUTE_PATH_LENGTH]}
+              strokeDashoffset={isStarting && flowAnim ? Animated.add(dashOffset as any, flowOffset as any) : dashOffset as any}
             />
-          </svg>
+          </Svg>
         </View>
 
         {/* Pickup Pulse */}

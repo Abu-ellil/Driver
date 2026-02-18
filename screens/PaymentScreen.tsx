@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Animated } from 'react-native';
+import { View, StyleSheet, ScrollView, TouchableOpacity, TextInput, Animated } from 'react-native';
+import Text from '../components/IconText';
 import { Screen } from '../types';
 import { useTheme } from '../context/ThemeContext';
 
@@ -204,3 +205,4 @@ const styles = StyleSheet.create({
 });
 
 export default PaymentScreen;
+

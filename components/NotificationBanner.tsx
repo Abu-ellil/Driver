@@ -1,6 +1,7 @@
 
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Animated } from 'react-native';
+import Text from './IconText';
 import { useNotifications } from '../context/NotificationContext';
 import { useTheme } from '../context/ThemeContext';
 import { Screen } from '../types';
@@ -106,3 +107,4 @@ const styles = StyleSheet.create({
 });
 
 export default NotificationBanner;
+

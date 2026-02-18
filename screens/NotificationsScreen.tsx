@@ -1,6 +1,7 @@
 
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import Text from '../components/IconText';
 import { Screen } from '../types';
 import { useTheme } from '../context/ThemeContext';
 import { useNotifications } from '../context/NotificationContext';
@@ -203,3 +204,4 @@ const styles = StyleSheet.create({
 });
 
 export default NotificationsScreen;
+

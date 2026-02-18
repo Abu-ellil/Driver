@@ -1,6 +1,8 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, Animated, Dimensions, Platform, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Image, ScrollView, Animated, Dimensions, ActivityIndicator } from 'react-native';
+import { Svg, Defs, Pattern, Path, Rect } from 'react-native-svg';
+import Text from '../components/IconText';
 import { Screen } from '../types';
 import { useConnectivity } from '../context/ConnectivityContext';
 import { useTheme } from '../context/ThemeContext';
@@ -23,18 +25,18 @@ const OfflineMapFallback: React.FC<{ colors: any, cachedUri: string | null }> = 
       <Image source={{ uri: cachedUri }} style={[styles.mapImage, { opacity: 0.3, filter: 'grayscale(100%)' } as any]} />
     ) : (
       <View style={StyleSheet.absoluteFill}>
-        <svg width="100%" height="100%" viewBox="0 0 100 100" style={{ opacity: 0.15 }}>
-          <defs>
-            <pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse">
-              <path d="M 10 0 L 0 0 0 10" fill="none" stroke={colors.text} strokeWidth="0.2"/>
-            </pattern>
-          </defs>
-          <rect width="100%" height="100%" fill="url(#grid)" />
-          <rect x="10" y="10" width="15" height="15" rx="2" fill={colors.border} />
-          <rect x="40" y="15" width="20" height="10" rx="2" fill={colors.border} />
-          <rect x="70" y="40" width="15" height="25" rx="2" fill={colors.border} />
-          <rect x="20" y="50" width="10" height="15" rx="2" fill={colors.border} />
-        </svg>
+        <Svg width="100%" height="100%" viewBox="0 0 100 100" style={{ opacity: 0.15 }}>
+          <Defs>
+            <Pattern id="grid" width={10} height={10} patternUnits="userSpaceOnUse">
+              <Path d="M 10 0 L 0 0 0 10" fill="none" stroke={colors.text} strokeWidth={0.2} />
+            </Pattern>
+          </Defs>
+          <Rect width="100%" height="100%" fill="url(#grid)" />
+          <Rect x={10} y={10} width={15} height={15} rx={2} fill={colors.border} />
+          <Rect x={40} y={15} width={20} height={10} rx={2} fill={colors.border} />
+          <Rect x={70} y={40} width={15} height={25} rx={2} fill={colors.border} />
+          <Rect x={20} y={50} width={10} height={15} rx={2} fill={colors.border} />
+        </Svg>
       </View>
     )}
     
@@ -110,17 +112,17 @@ const ActiveTripScreen: React.FC<ActiveTripScreenProps> = ({ onNavigate }) => {
         
         {/* رسم المسار (دائماً مرئي) */}
         <View style={StyleSheet.absoluteFill} pointerEvents="none">
-          <svg width="100%" height="100%" viewBox="0 0 100 100" style={{ position: 'absolute' }}>
-            <path 
+          <Svg width="100%" height="100%" viewBox="0 0 100 100" style={{ position: 'absolute' }}>
+            <Path
               d={ROUTE_PATH} 
               fill="none" 
               stroke={isOnline ? colors.primary : colors.subtext} 
-              strokeWidth="2.5" 
+              strokeWidth={2.5}
               strokeLinecap="round" 
               strokeDasharray="4,4" 
               opacity={isOnline ? 1 : 0.8}
             />
-          </svg>
+          </Svg>
         </View>
 
         {/* نقاط الرحلة على الخريطة */}
@@ -303,3 +305,4 @@ const styles = StyleSheet.create({
 });
 
 export default ActiveTripScreen;
+

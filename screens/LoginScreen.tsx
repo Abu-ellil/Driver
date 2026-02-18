@@ -1,6 +1,7 @@
 
 import React from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
+import Text from '../components/IconText';
 import { useTheme } from '../context/ThemeContext';
 
 interface LoginScreenProps {
@@ -236,3 +237,4 @@ const styles = StyleSheet.create({
 });
 
 export default LoginScreen;
+

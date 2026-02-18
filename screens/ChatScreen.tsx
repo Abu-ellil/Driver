@@ -1,11 +1,13 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, TextInput, Platform, KeyboardAvoidingView, ActivityIndicator, Animated, Easing } from 'react-native';
+import { View, StyleSheet, ScrollView, TouchableOpacity, Image, TextInput, Platform, KeyboardAvoidingView, ActivityIndicator, Animated, Easing } from 'react-native';
+import Text from '../components/IconText';
 import { Screen, Message } from '../types';
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
 import { useConnectivity } from '../context/ConnectivityContext';
 import { useTheme } from '../context/ThemeContext';
 import { useWebSocket } from '../context/WebSocketContext';
+import { StorageService } from '../services/StorageService';
 
 interface ChatScreenProps {
   onNavigate: (s: Screen) => void;
@@ -125,11 +127,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ onNavigate }) => {
   const { socket } = useWebSocket();
   const { colors } = useTheme();
   
-  // تحميل الرسائل من Local Storage أو استخدام الرسائل الافتراضية
-  const [messages, setMessages] = useState<Message[]>(() => {
-    const saved = localStorage.getItem(CHAT_STORAGE_KEY);
-    return saved ? JSON.parse(saved) : INITIAL_MESSAGES;
-  });
+  // تحميل الرسائل من التخزين المحلي بطريقة متوافقة بين الويب و RN.
+  const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES);
 
   const [messageText, setMessageText] = useState('');
   const [isDictating, setIsDictating] = useState(false);
@@ -141,9 +140,33 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ onNavigate }) => {
   const sessionRef = useRef<any>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  // حفظ الرسائل في Local Storage عند كل تغيير
   useEffect(() => {
-    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages));
+    let mounted = true;
+
+    const loadMessages = async () => {
+      const saved = await StorageService.getItem(CHAT_STORAGE_KEY);
+      if (!mounted || !saved) return;
+
+      try {
+        const parsed = JSON.parse(saved) as Message[];
+        if (Array.isArray(parsed)) {
+          setMessages(parsed);
+        }
+      } catch {
+        // Ignore malformed persisted data and keep defaults.
+      }
+    };
+
+    loadMessages();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // حفظ الرسائل في التخزين عند كل تغيير
+  useEffect(() => {
+    StorageService.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages));
   }, [messages]);
 
   // Typing animation dots
@@ -239,12 +262,26 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ onNavigate }) => {
       return;
     }
 
+    if (
+      Platform.OS !== 'web' ||
+      typeof window === 'undefined' ||
+      typeof navigator === 'undefined' ||
+      !navigator.mediaDevices?.getUserMedia
+    ) {
+      alert("الإملاء الصوتي متاح حالياً على الويب فقط.");
+      return;
+    }
+
     try {
       setIsConnecting(true);
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+      const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextCtor) {
+        throw new Error('AudioContext is unavailable');
+      }
+      const audioContext = new AudioContextCtor({ sampleRate: 16000 });
       audioContextRef.current = audioContext;
 
       const sessionPromise = ai.live.connect({
@@ -406,3 +443,4 @@ const styles = StyleSheet.create({
 });
 
 export default ChatScreen;
+

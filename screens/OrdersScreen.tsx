@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, Modal, TextInput, Animated, Image, Dimensions, Easing, LayoutChangeEvent } from 'react-native';
+import { View, StyleSheet, ScrollView, TouchableOpacity, Platform, Modal, TextInput, Animated, Image, Dimensions, Easing, LayoutChangeEvent } from 'react-native';
+import Text from '../components/IconText';
 import { Screen, Order } from '../types';
 import { useTheme } from '../context/ThemeContext';
 import { useWebSocket } from '../context/WebSocketContext';
@@ -550,3 +551,4 @@ const styles = StyleSheet.create({
 });
 
 export default OrdersScreen;
+
